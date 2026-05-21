@@ -63,17 +63,11 @@ export const createDemoForm = (): RemittanceFormState => ({
 });
 
 export const createSessionId = () => {
-  const existing = window.localStorage.getItem('padalasplit.sessionId');
-  if (existing) {
-    return existing;
-  }
-
-  const sessionId =
+  return (
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
-      : `session-${Date.now()}`;
-  window.localStorage.setItem('padalasplit.sessionId', sessionId);
-  return sessionId;
+      : `session-${Date.now()}`
+  );
 };
 
 export const roundXlm = (value: number) => Math.round((value + Number.EPSILON) * 10_000_000) / 10_000_000;

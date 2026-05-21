@@ -1,4 +1,5 @@
 import {
+  Account,
   Address,
   BASE_FEE,
   Contract,
@@ -37,11 +38,20 @@ type VaultBucketSpec = {
   unlockTimestamp: number;
 };
 
+export type VaultProgressPhase = 'preparing' | 'signing' | 'submitted' | 'confirming';
+
+export type VaultProgressUpdate = {
+  phase: VaultProgressPhase;
+  message: string;
+  hash?: string;
+};
+
 type CreateVaultRemittanceInput = {
   sourcePublicKey: string;
   recipient: string;
   remittanceId: string;
   buckets: VaultBucketSpec[];
+  onProgress?: (update: VaultProgressUpdate) => void;
 };
 
 type WithdrawVaultBucketInput = {
@@ -54,14 +64,20 @@ export const createVaultRemittance = async ({
   sourcePublicKey,
   recipient,
   remittanceId,
-  buckets
+  buckets,
+  onProgress
 }: CreateVaultRemittanceInput) => {
-  const result = await submitVaultCall(sourcePublicKey, 'create_remittance', [
-    new Address(sourcePublicKey).toScVal(),
-    new Address(recipient).toScVal(),
-    bytes32ScVal(remittanceContractId(remittanceId)),
-    bucketSpecsToScVal(buckets)
-  ]);
+  const result = await submitVaultCall(
+    sourcePublicKey,
+    'create_remittance',
+    [
+      new Address(sourcePublicKey).toScVal(),
+      new Address(recipient).toScVal(),
+      bytes32ScVal(remittanceContractId(remittanceId)),
+      bucketSpecsToScVal(buckets)
+    ],
+    onProgress
+  );
 
   return {
     hash: result.hash,
@@ -112,12 +128,15 @@ export const readVaultBucket = async (remittanceId: string, bucketId: string) =>
   };
 };
 
-export const applyVaultMetadata = (remittance: RemittanceRecord, result: { hash: string; stellarExpertUrl: string }) => ({
+export const applyVaultMetadata = (
+  remittance: RemittanceRecord,
+  result?: { hash: string; stellarExpertUrl: string }
+) => ({
   ...remittance,
   status: 'completed' as const,
   vaultContractId: VAULT_CONTRACT_ID,
-  vaultTransactionHash: result.hash,
-  vaultExpertUrl: result.stellarExpertUrl,
+  vaultTransactionHash: result?.hash || remittance.vaultTransactionHash,
+  vaultExpertUrl: result?.stellarExpertUrl || remittance.vaultExpertUrl,
   buckets: remittance.buckets.map((bucket) => ({
     ...bucket,
     contractBucketId: bucketContractId(remittance.id, bucket.id),
@@ -125,8 +144,9 @@ export const applyVaultMetadata = (remittance: RemittanceRecord, result: { hash:
       bucket.unlockTimestamp && bucket.unlockTimestamp <= Math.floor(Date.now() / 1000)
         ? ('withdrawable' as const)
         : ('vaulted' as const),
-    transactionHash: result.hash,
-    stellarExpertUrl: result.stellarExpertUrl
+    transactionHash: result?.hash || bucket.transactionHash,
+    stellarExpertUrl: result?.stellarExpertUrl || bucket.stellarExpertUrl,
+    error: undefined
   }))
 });
 
@@ -136,31 +156,118 @@ export const bucketToVaultSpec = (remittanceId: string, bucket: BucketRecord): V
   unlockTimestamp: bucket.unlockTimestamp || Math.floor(Date.now() / 1000)
 });
 
-const submitVaultCall = async (sourcePublicKey: string, method: string, args: xdr.ScVal[]) => {
-  const server = new rpc.Server(SOROBAN_RPC_URL);
-  const tx = await buildVaultTransaction(sourcePublicKey, method, args);
-  const prepared = await server.prepareTransaction(tx);
-  const signedResult = await signTransaction(prepared.toXDR(), {
-    address: sourcePublicKey,
-    networkPassphrase: Networks.TESTNET
-  });
-
-  if (signedResult.error) {
-    throw new Error(signedResult.error.message || 'Freighter declined the Soroban transaction.');
+/**
+ * Recover a remittance's vault status by reading each bucket directly
+ * from the Soroban contract. Useful when the app record was corrupted
+ * (e.g. page refresh during vault creation) but the on-chain vault
+ * still exists.
+ */
+export const recoverVaultRemittance = async (
+  remittance: RemittanceRecord
+): Promise<RemittanceRecord> => {
+  if (!VAULT_CONTRACT_ID) {
+    throw new Error('Soroban vault contract is not configured.');
   }
 
-  const signedTransaction = TransactionBuilder.fromXDR(signedResult.signedTxXdr, Networks.TESTNET);
-  const sendResult = await server.sendTransaction(signedTransaction);
+  let recovered = { ...remittance };
+  let anyFound = false;
 
-  if (sendResult.status === 'ERROR') {
-    throw new Error('Soroban RPC rejected the transaction.');
+  for (const bucket of remittance.buckets) {
+    try {
+      const vaultBucket = await readVaultBucket(remittance.id, bucket.id);
+      const unlockTime = Number(vaultBucket.unlock_time);
+      const isWithdrawn = vaultBucket.claimed;
+      const canWithdrawNow = !isWithdrawn && unlockTime <= Math.floor(Date.now() / 1000);
+
+      recovered = {
+        ...recovered,
+        buckets: recovered.buckets.map((candidate) =>
+          candidate.id === bucket.id
+            ? {
+                ...candidate,
+                contractBucketId: bucketContractId(remittance.id, bucket.id),
+                unlockTimestamp: unlockTime,
+                paymentStatus: isWithdrawn
+                  ? ('withdrawn' as const)
+                  : canWithdrawNow
+                    ? ('withdrawable' as const)
+                    : ('vaulted' as const),
+                error: undefined
+              }
+            : candidate
+        )
+      };
+      anyFound = true;
+    } catch {
+      // Bucket not found on-chain — leave its current status
+    }
   }
 
-  return waitForSorobanTransaction(server, sendResult.hash);
+  if (!anyFound) {
+    throw new Error('No vault data found on-chain for this remittance. The vault may not have been created.');
+  }
+
+  return {
+    ...recovered,
+    status: 'completed',
+    vaultContractId: VAULT_CONTRACT_ID,
+    vaultTransactionHash: recovered.vaultTransactionHash,
+    vaultExpertUrl: recovered.vaultExpertUrl
+  };
 };
 
-const waitForSorobanTransaction = async (server: rpc.Server, txHash: string) => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+const submitVaultCall = async (
+  sourcePublicKey: string,
+  method: string,
+  args: xdr.ScVal[],
+  onProgress?: (update: VaultProgressUpdate) => void
+) => {
+  try {
+    const server = new rpc.Server(SOROBAN_RPC_URL);
+    onProgress?.({ phase: 'preparing', message: 'Simulating the Soroban transaction.' });
+    const tx = await buildVaultTransaction(sourcePublicKey, method, args);
+    const prepared = await server.prepareTransaction(tx);
+    onProgress?.({ phase: 'signing', message: 'Waiting for Freighter signature.' });
+    const signedResult = await signTransaction(prepared.toXDR(), {
+      address: sourcePublicKey,
+      networkPassphrase: Networks.TESTNET
+    });
+
+    if (typeof signedResult !== 'string' && signedResult.error) {
+      throw new Error(signedResult.error.message || 'Freighter declined the Soroban transaction.');
+    }
+
+    const signedXdr = typeof signedResult === 'string' ? signedResult : signedResult.signedTxXdr;
+    const signedTransaction = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
+    const sendResult = await server.sendTransaction(signedTransaction);
+
+    if (sendResult.status === 'ERROR') {
+      throw new Error('Soroban RPC rejected the transaction.');
+    }
+
+    onProgress?.({
+      phase: 'submitted',
+      message: 'Transaction submitted. Waiting for Testnet confirmation.',
+      hash: sendResult.hash
+    });
+
+    return waitForSorobanTransaction(server, sendResult.hash, onProgress);
+  } catch (error) {
+    throw new Error(formatVaultError(error));
+  }
+};
+
+const waitForSorobanTransaction = async (
+  server: rpc.Server,
+  txHash: string,
+  onProgress?: (update: VaultProgressUpdate) => void
+) => {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    onProgress?.({
+      phase: 'confirming',
+      message: `Confirming on-chain. Check ${attempt + 1}/60.`,
+      hash: txHash
+    });
     const result = await server.getTransaction(txHash);
 
     if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -174,7 +281,7 @@ const waitForSorobanTransaction = async (server: rpc.Server, txHash: string) => 
     await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 
-  throw new Error('Timed out waiting for Soroban transaction confirmation.');
+  throw new Error('Timed out waiting for Soroban transaction confirmation. The transaction may still confirm on Testnet; check the Stellar Expert link if a hash is shown.');
 };
 
 const buildVaultTransaction = async (sourcePublicKey: string | undefined, method: string, args: xdr.ScVal[]) => {
@@ -185,7 +292,7 @@ const buildVaultTransaction = async (sourcePublicKey: string | undefined, method
   const server = new rpc.Server(SOROBAN_RPC_URL);
   const sourceAccount = sourcePublicKey
     ? await server.getAccount(sourcePublicKey)
-    : await server.getAccount('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
+    : new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
   const vault = new Contract(VAULT_CONTRACT_ID);
 
   return new TransactionBuilder(sourceAccount, {
@@ -201,8 +308,8 @@ const bucketSpecsToScVal = (buckets: VaultBucketSpec[]) =>
   xdr.ScVal.scvVec(
     buckets.map((bucket) =>
       xdr.ScVal.scvMap([
-        scMapEntry('bucket_id', bytes32ScVal(bucket.bucketId)),
         scMapEntry('amount', nativeToScVal(xlmToStroops(bucket.amount), { type: 'i128' })),
+        scMapEntry('bucket_id', bytes32ScVal(bucket.bucketId)),
         scMapEntry('unlock_time', nativeToScVal(bucket.unlockTimestamp, { type: 'u64' }))
       ])
     )
@@ -219,3 +326,28 @@ const bytes32ScVal = (hex: string) => xdr.ScVal.scvBytes(hexToBytes(hex));
 const bytes32Hex = (value: string) => Buffer.from(hash(Buffer.from(encoder.encode(value)))).toString('hex');
 
 const hexToBytes = (hex: string) => Buffer.from(hex, 'hex');
+
+const vaultErrorMessages: Record<string, string> = {
+  '1': 'Vault is already initialized.',
+  '2': 'Vault is not initialized.',
+  '3': 'Add at least one bucket before creating a vault remittance.',
+  '4': 'Every vault bucket amount must be greater than 0.',
+  '5': 'Two buckets resolved to the same contract bucket ID.',
+  '6': 'This remittance already exists in the Soroban vault. Create a new preview to submit another vault, or use the existing recipient dashboard entry.',
+  '7': 'Vault bucket was not found.',
+  '8': 'Only the recipient wallet can withdraw this bucket.',
+  '9': 'This bucket is still locked. Wait until its unlock time before withdrawing.',
+  '10': 'This bucket was already withdrawn.'
+};
+
+export const REMITTANCE_EXISTS_MESSAGE = vaultErrorMessages['6'];
+
+const formatVaultError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const contractError = message.match(/Error\(Contract,\s*#(\d+)\)/);
+  if (contractError?.[1] && vaultErrorMessages[contractError[1]]) {
+    return vaultErrorMessages[contractError[1]];
+  }
+
+  return message;
+};

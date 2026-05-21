@@ -1,27 +1,54 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { RemittanceRecord } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const STORAGE_KEY = 'padalasplit.remittances';
 
-const supabase =
-  SUPABASE_URL && SUPABASE_ANON_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+/**
+ * Singleton Supabase client.
+ * Avoids "Multiple GoTrueClient instances" warnings that occur when
+ * Vite HMR re-executes this module and creates duplicate clients.
+ */
+let _supabase: SupabaseClient | null = null;
 
-const toDatabaseRecord = (remittance: RemittanceRecord) => ({
-  id: remittance.id,
-  session_id: remittance.sessionId,
-  sender_name: remittance.senderName,
-  sender_public_key: remittance.senderPublicKey,
-  recipient_name: remittance.recipientName,
-  recipient_address: remittance.recipientAddress,
-  total_amount: remittance.totalAmount,
-  status: remittance.status,
-  buckets: remittance.buckets,
-  created_at: remittance.createdAt
-});
+const getSupabase = (): SupabaseClient | null => {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+
+  if (!_supabase) {
+    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return _supabase;
+};
+
+/**
+ * Build the database row object.
+ * Vault-related columns are only included when they carry a value so the
+ * upsert doesn't fail with PGRST204 if the Supabase table was created
+ * without those columns.
+ */
+const toDatabaseRecord = (remittance: RemittanceRecord) => {
+  const row: Record<string, unknown> = {
+    id: remittance.id,
+    session_id: remittance.sessionId,
+    sender_name: remittance.senderName,
+    sender_public_key: remittance.senderPublicKey,
+    recipient_name: remittance.recipientName,
+    recipient_address: remittance.recipientAddress,
+    total_amount: remittance.totalAmount,
+    status: remittance.status,
+    buckets: remittance.buckets,
+    created_at: remittance.createdAt
+  };
+
+  // Only include vault columns if we actually have data — avoids
+  // "Could not find the 'vault_contract_id' column" errors.
+  if (remittance.vaultContractId) row.vault_contract_id = remittance.vaultContractId;
+  if (remittance.vaultTransactionHash) row.vault_transaction_hash = remittance.vaultTransactionHash;
+  if (remittance.vaultExpertUrl) row.vault_expert_url = remittance.vaultExpertUrl;
+
+  return row;
+};
 
 const fromDatabaseRecord = (record: Record<string, unknown>): RemittanceRecord => ({
   id: String(record.id),
@@ -32,6 +59,9 @@ const fromDatabaseRecord = (record: Record<string, unknown>): RemittanceRecord =
   recipientAddress: String(record.recipient_address),
   totalAmount: Number(record.total_amount),
   status: record.status as RemittanceRecord['status'],
+  vaultContractId: record.vault_contract_id ? String(record.vault_contract_id) : undefined,
+  vaultTransactionHash: record.vault_transaction_hash ? String(record.vault_transaction_hash) : undefined,
+  vaultExpertUrl: record.vault_expert_url ? String(record.vault_expert_url) : undefined,
   buckets: record.buckets as RemittanceRecord['buckets'],
   createdAt: String(record.created_at)
 });
@@ -51,13 +81,29 @@ const writeLocalRecords = (records: RemittanceRecord[]) => {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 };
 
-export const isSupabaseConfigured = () => Boolean(supabase);
+export const isSupabaseConfigured = () => Boolean(getSupabase());
 
 export const saveRemittance = async (remittance: RemittanceRecord) => {
+  const supabase = getSupabase();
   if (supabase) {
-    const { error } = await supabase.from('remittances').upsert(toDatabaseRecord(remittance));
-    if (error) throw error;
-    return remittance;
+    try {
+      const { error } = await supabase.from('remittances').upsert(toDatabaseRecord(remittance));
+      if (error) {
+        // If the error is about missing columns, fall through to local storage.
+        if (error.code === 'PGRST204') {
+          console.warn('[PadalaSplit] Supabase table is missing columns, falling back to local storage:', error.message);
+        } else {
+          throw error;
+        }
+      } else {
+        return remittance;
+      }
+    } catch (err) {
+      // Re-throw non-column errors
+      const pgError = err as { code?: string; message?: string };
+      if (pgError.code !== 'PGRST204') throw err;
+      console.warn('[PadalaSplit] Supabase table is missing columns, falling back to local storage:', pgError.message);
+    }
   }
 
   const records = readLocalRecords().filter((record) => record.id !== remittance.id);
@@ -67,16 +113,83 @@ export const saveRemittance = async (remittance: RemittanceRecord) => {
 };
 
 export const listRemittances = async (sessionId: string) => {
+  const supabase = getSupabase();
   if (supabase) {
-    const { data, error } = await supabase
-      .from('remittances')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('remittances')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return (data || []).map((record) => fromDatabaseRecord(record));
+      if (error) {
+        console.warn('[PadalaSplit] Supabase query failed, falling back to local storage:', error.message);
+      } else {
+        return (data || []).map((record) => fromDatabaseRecord(record));
+      }
+    } catch (err) {
+      console.warn('[PadalaSplit] Supabase query failed, falling back to local storage:', err);
+    }
   }
 
   return readLocalRecords().filter((record) => record.sessionId === sessionId);
+};
+
+export const listRemittancesForWallet = async (walletAddress: string) => {
+  if (!walletAddress) return [];
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const [senderResult, recipientResult] = await Promise.all([
+        supabase.from('remittances').select('*').eq('sender_public_key', walletAddress),
+        supabase.from('remittances').select('*').eq('recipient_address', walletAddress)
+      ]);
+
+      if (senderResult.error) throw senderResult.error;
+      if (recipientResult.error) throw recipientResult.error;
+
+      const records = [...(senderResult.data || []), ...(recipientResult.data || [])]
+        .map((record) => fromDatabaseRecord(record))
+        .filter((record, index, records) => records.findIndex((candidate) => candidate.id === record.id) === index)
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+
+      return records;
+    } catch (err) {
+      console.warn('[PadalaSplit] Supabase wallet query failed, falling back to local storage:', err);
+    }
+  }
+
+  return readLocalRecords()
+    .filter((record) => record.senderPublicKey === walletAddress || record.recipientAddress === walletAddress)
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+};
+
+export const clearRemittances = async (remittanceIds: string[]) => {
+  if (remittanceIds.length === 0) {
+    clearLocalRemittances();
+    return;
+  }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('remittances').delete().in('id', remittanceIds);
+      if (error) {
+        console.warn('[PadalaSplit] Supabase delete failed, clearing local storage instead:', error.message);
+      } else {
+        return;
+      }
+    } catch (err) {
+      console.warn('[PadalaSplit] Supabase delete failed, clearing local storage instead:', err);
+    }
+  }
+
+  const remaining = readLocalRecords().filter((record) => !remittanceIds.includes(record.id));
+  writeLocalRecords(remaining);
+};
+
+export const clearLocalRemittances = () => {
+  window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem('padalasplit.sessionId');
 };

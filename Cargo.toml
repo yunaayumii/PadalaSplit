@@ -4,3 +4,6 @@ members = ["contracts/padalasplit_vault"]
 
 [workspace.dependencies]
 soroban-sdk = "23.0.1"
+
+[profile.release]
+overflow-checks = true

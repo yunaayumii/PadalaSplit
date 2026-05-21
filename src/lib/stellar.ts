@@ -20,14 +20,46 @@ export const STELLAR_EXPERT_TESTNET_BASE = 'https://stellar.expert/explorer/test
 
 export const getStellarExpertUrl = (hash: string) => `${STELLAR_EXPERT_TESTNET_BASE}/${hash}`;
 
+/**
+ * Attempt to silently restore a Freighter connection without showing
+ * any popups. Returns the public key if Freighter is installed and
+ * the app was previously allowed; returns null otherwise.
+ */
+export const tryAutoConnect = async (): Promise<string | null> => {
+  try {
+    const connected = await isConnected();
+    if (connected.error || !connected.isConnected) return null;
+
+    const addressResult = await getAddress();
+    if (typeof addressResult === 'string') return addressResult || null;
+    if (addressResult.error) return null;
+    return addressResult.address || null;
+  } catch {
+    return null;
+  }
+};
+
 export const connectFreighter = async () => {
   const connected = await isConnected();
-  if (!connected) {
+  if (connected.error) {
+    throw new Error(connected.error.message || 'Freighter is unavailable in this browser.');
+  }
+  if (!connected.isConnected) {
     throw new Error('Freighter is not installed or is unavailable in this browser.');
   }
 
-  await setAllowed();
+  const allowed = await setAllowed();
+  if (allowed.error) {
+    throw new Error(allowed.error.message || 'Freighter did not allow this app.');
+  }
+  if (!allowed.isAllowed) {
+    throw new Error('Freighter did not allow this app.');
+  }
+
   const addressResult = await getAddress();
+  if (typeof addressResult !== 'string' && addressResult.error) {
+    throw new Error(addressResult.error.message || 'Freighter did not return a public key.');
+  }
   const publicKey = typeof addressResult === 'string' ? addressResult : addressResult.address;
 
   if (!publicKey) {
@@ -69,6 +101,9 @@ export const submitBucketPayment = async ({
     address: sourcePublicKey,
     networkPassphrase: Networks.TESTNET
   });
+  if (typeof signedResult !== 'string' && signedResult.error) {
+    throw new Error(signedResult.error.message || 'Freighter declined the transaction.');
+  }
   const signedXdr = typeof signedResult === 'string' ? signedResult : signedResult.signedTxXdr;
   const signedTransaction = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
   const response = await server.submitTransaction(signedTransaction);
