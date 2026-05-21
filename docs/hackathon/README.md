@@ -18,3 +18,6 @@ Future agents should read the files in this folder directly instead of refetchin
 
 - `readme-format.md` - copied README structure required for hackathon project submissions.
 - `stellar-soroban-mainnet-guide.md` - full copied Stellar Hackathon PH 2026 Soroban deployment guide for local reference.
+- `decisions.md` - decision framework for hackathon scope, judging fit, and demo reliability.
+- `ideas.md` - original idea shortlist and rationale for the selected product direction.
+- `project-guide.md` - copied hackathon theme, timeline, judging criteria, prizes, and submission checklist.
