@@ -32,6 +32,7 @@ soroban-identity/
 # Local agent and editor state
 AGENTS.local.md
 NOTES.local.md
+local-context/
 .codex/
 .claude/
 .cursor/

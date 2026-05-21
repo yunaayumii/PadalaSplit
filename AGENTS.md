@@ -27,9 +27,11 @@ This is a fresh Git project with no application scaffold committed yet. As Padal
 - `tests/` for unit and integration tests.
 - `public/` or `assets/` for static images, icons, and other client assets.
 - `contracts/` for Stellar smart contracts, if the project includes Soroban code.
-- `docs/` for product notes, deployment links, demos, and architecture decisions.
+- `docs/` for product notes, deployment links, demos, architecture decisions, and hackathon context.
 
 Group feature code by domain when possible, for example `src/remittances/`, `src/buckets/`, `src/stellar/`, and `src/wallets/`.
+
+Before planning major work, check the copied local references in `docs/hackathon/` for hackathon setup guides, checkpoint rules, and submission requirements. Use those local files as the default source of truth instead of fetching remote GitHub files again.
 
 ## Build, Test, and Development Commands
 
