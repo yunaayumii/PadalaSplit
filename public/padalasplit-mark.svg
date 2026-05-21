@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">PadalaSplit mark</title>
+  <desc id="desc">A circular remittance mark split into budget buckets.</desc>
+  <rect width="128" height="128" rx="24" fill="#0f172a"/>
+  <path d="M64 20a44 44 0 1 0 0 88V64h44A44 44 0 0 0 64 20Z" fill="#38bdf8"/>
+  <path d="M72 72v36a44 44 0 0 0 36-36H72Z" fill="#22c55e"/>
+  <path d="M72 20v36h36a44 44 0 0 0-36-36Z" fill="#f59e0b"/>
+  <circle cx="64" cy="64" r="15" fill="#f8fafc"/>
+</svg>

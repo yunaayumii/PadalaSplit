@@ -31,31 +31,51 @@ We built PadalaSplit to help OFWs send money home with context, not just value. 
 - Demo mode — prefilled remittance data for a smooth hackathon presentation.
 - Locked bucket simulation — show protected funds in the UI while keeping on-chain enforcement as a future Soroban or backend feature.
 
+See `docs/features.md` for the full MVP feature plan and future roadmap.
+
 ## 🛠️ Tech Stack
 
-- Frontend: To be finalized, likely React, Next.js, or Vite
-- Backend: To be finalized, likely local storage or a lightweight database for the MVP
+- Frontend: Vite, React, TypeScript
+- Backend: Supabase for persisted demo history, with browser local storage fallback when Supabase is not configured
 - Blockchain: Stellar Testnet, XLM, Stellar SDK, Horizon API
+- Wallet: Freighter for Testnet transaction signing
 - Other tools: Stellar Expert for transaction verification
 
 ## 🚀 How to Run Locally
 
-The application scaffold has not been added yet. Local setup commands will be updated once the frontend project is created.
-
-Expected setup:
+Install dependencies and start the Vite dev server:
 
 ```bash
-git clone https://github.com/yunaayumii/PadalaSplit
-cd PadalaSplit
 npm install
 npm run dev
 ```
+
+Create a local environment file from the example:
+
+```bash
+cp .env.example .env.local
+```
+
+Required for Supabase persistence:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+If Supabase is not configured, the app still runs with browser local storage for demo history.
+
+### Supabase Setup
+
+Run the SQL in `docs/supabase-schema.sql` in the Supabase SQL editor. The MVP uses demo session IDs instead of full authentication, so the included policies are intentionally permissive for hackathon demo use only.
+
+### Freighter Setup
+
+Install the Freighter browser extension, switch it to Stellar Testnet, and fund the sender account with Testnet XLM before submitting real split payments. Demo proof mode works without Freighter but only generates mock hashes.
 
 ## 🌐 Deployment
 
 ### Testnet
 
-- Contract / App Address: To be provided after Testnet setup and deployment
+- Contract / App Address: Not required for the payment-operation MVP
 - 📸 Screenshot — Stellar Expert (Testnet): To be added
 
 ### Mainnet

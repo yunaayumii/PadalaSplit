@@ -33,16 +33,16 @@ Group feature code by domain when possible, for example `src/remittances/`, `src
 
 Before planning major work, check the copied local references in `docs/hackathon/` for hackathon setup guides, checkpoint rules, and submission requirements. Use those local files as the default source of truth instead of fetching remote GitHub files again.
 
-Before planning feature work, also check `local-context/FEATURES.md`. It is the current source of truth for planned PadalaSplit features, recommended 8-hour MVP scope, demo mode, remittance protection ideas, and future backlog.
+Before planning feature work, also check `docs/features.md`. It is the current tracked source of truth for planned PadalaSplit features, recommended MVP scope, demo mode, remittance protection ideas, and future backlog.
 
 ## Build, Test, and Development Commands
 
-No build system is committed yet. Add commands to this section when a framework or toolchain is introduced. Prefer standard scripts such as:
+Use the committed Vite React toolchain:
 
 - `npm install` to install frontend dependencies.
-- `npm run dev` to start a local development server.
-- `npm run build` to create a production build.
-- `npm test` to run the test suite.
+- `npm run dev` to start the local Vite development server.
+- `npm run build` to type-check and create a production build.
+- `npm test` to run the Vitest suite.
 - `stellar contract build` or project-specific Soroban commands for contract builds.
 
 Document required environment variables in `.env.example`, not in this file.
