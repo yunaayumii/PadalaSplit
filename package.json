@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "contract:test": "cargo test --workspace",
+    "contract:build": "stellar contract build"
   },
   "dependencies": {
     "@stellar/freighter-api": "^4.1.0",

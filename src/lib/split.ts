@@ -44,13 +44,22 @@ export const DEFAULT_BUCKETS: BucketDraft[] = [
 
 export const DEMO_RECIPIENT_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
+export const createDefaultUnlockAt = (minutesFromNow = 3) => {
+  const date = new Date(Date.now() + minutesFromNow * 60 * 1000);
+  date.setSeconds(0, 0);
+  return date.toISOString().slice(0, 16);
+};
+
 export const createDemoForm = (): RemittanceFormState => ({
   senderName: 'Maria Santos',
   recipientName: 'Ana Santos',
   recipientAddress: DEMO_RECIPIENT_ADDRESS,
   totalAmount: 100,
   splitMode: 'percentage',
-  buckets: DEFAULT_BUCKETS.map((bucket) => ({ ...bucket }))
+  buckets: DEFAULT_BUCKETS.map((bucket) => ({
+    ...bucket,
+    unlockAt: bucket.locked ? createDefaultUnlockAt() : undefined
+  }))
 });
 
 export const createSessionId = () => {
@@ -119,6 +128,12 @@ export const validateRemittance = (form: RemittanceFormState): ValidationResult 
     if (!Number.isFinite(bucket.amount) || bucket.amount <= 0) {
       errors.push(`${bucket.label || `Bucket ${index + 1}`} must have an amount greater than 0.`);
     }
+    if (bucket.locked && !bucket.unlockAt) {
+      errors.push(`${bucket.label || `Bucket ${index + 1}`} needs an unlock date.`);
+    }
+    if (bucket.locked && bucket.unlockAt && Number.isNaN(Date.parse(bucket.unlockAt))) {
+      errors.push(`${bucket.label || `Bucket ${index + 1}`} needs a valid unlock date.`);
+    }
   });
 
   if (form.splitMode === 'percentage' && Math.abs(percentageTotal - 100) > 0.000001) {
@@ -162,6 +177,9 @@ export const createRemittanceRecord = (
       label: bucket.label.trim(),
       memo: memoForBucket(bucket.label),
       status: bucket.locked ? 'locked' : 'available',
+      unlockTimestamp: bucket.locked && bucket.unlockAt
+        ? Math.floor(new Date(bucket.unlockAt).getTime() / 1000)
+        : Math.floor(Date.now() / 1000),
       paymentStatus: 'pending'
     }))
   };
@@ -169,7 +187,14 @@ export const createRemittanceRecord = (
 
 export const getRemittanceTotals = (remittance: RemittanceRecord) => {
   const paidTotal = remittance.buckets
-    .filter((bucket) => bucket.paymentStatus === 'paid' || bucket.paymentStatus === 'demo')
+    .filter(
+      (bucket) =>
+        bucket.paymentStatus === 'paid' ||
+        bucket.paymentStatus === 'demo' ||
+        bucket.paymentStatus === 'vaulted' ||
+        bucket.paymentStatus === 'withdrawable' ||
+        bucket.paymentStatus === 'withdrawn'
+    )
     .reduce((sum, bucket) => sum + bucket.amount, 0);
   const lockedTotal = remittance.buckets.filter((bucket) => bucket.locked).reduce((sum, bucket) => sum + bucket.amount, 0);
 

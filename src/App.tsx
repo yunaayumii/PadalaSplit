@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   calculateBuckets,
+  createDefaultUnlockAt,
   createDemoForm,
   createRemittanceRecord,
   createSessionId,
@@ -24,6 +25,13 @@ import {
   memoForBucket,
   validateRemittance
 } from './lib/split';
+import {
+  applyVaultMetadata,
+  bucketToVaultSpec,
+  createVaultRemittance,
+  isSorobanVaultConfigured,
+  withdrawVaultBucket
+} from './lib/soroban';
 import { connectFreighter, getStellarExpertUrl, submitBucketPayment } from './lib/stellar';
 import { isSupabaseConfigured, listRemittances, saveRemittance } from './lib/storage';
 import type { BucketDraft, RemittanceFormState, RemittanceRecord, SplitMode } from './lib/types';
@@ -37,7 +45,8 @@ const emptyBucket = (): BucketDraft => ({
   percentage: 0,
   amount: 0,
   locked: false,
-  releaseNote: 'Available immediately'
+  releaseNote: 'Available immediately',
+  unlockAt: undefined
 });
 
 const demoHash = (bucketId: string) => `demo-${bucketId}-${Date.now().toString(16)}`;
@@ -51,6 +60,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [withdrawingBucketId, setWithdrawingBucketId] = useState('');
 
   useEffect(() => {
     const nextSessionId = createSessionId();
@@ -220,6 +230,111 @@ function App() {
     setIsSubmitting(false);
   };
 
+  const handleCreateVaultRemittance = async () => {
+    if (!activeRemittance) return;
+    if (!isSorobanVaultConfigured()) {
+      setMessage('Configure VITE_PADALASPLIT_VAULT_CONTRACT_ID before creating a vault remittance.');
+      return;
+    }
+    if (!senderPublicKey) {
+      setMessage('Connect Freighter before creating a vault remittance.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage('');
+    let working: RemittanceRecord = {
+      ...activeRemittance,
+      status: 'submitting',
+      buckets: activeRemittance.buckets.map((bucket) => ({
+        ...bucket,
+        paymentStatus: 'submitting',
+        error: undefined
+      }))
+    };
+    await persistAndSelect(working);
+
+    try {
+      const result = await createVaultRemittance({
+        sourcePublicKey: senderPublicKey,
+        recipient: working.recipientAddress,
+        remittanceId: working.id,
+        buckets: working.buckets.map((bucket) => bucketToVaultSpec(working.id, bucket))
+      });
+      working = applyVaultMetadata(working, result);
+      await persistAndSelect(working);
+      setMessage('Vault remittance created on Soroban Testnet. Recipient can withdraw each bucket after unlock.');
+    } catch (error) {
+      working = {
+        ...working,
+        status: 'partial',
+        buckets: working.buckets.map((bucket) => ({
+          ...bucket,
+          paymentStatus: 'failed',
+          error: error instanceof Error ? error.message : 'Vault remittance failed.'
+        }))
+      };
+      await persistAndSelect(working);
+      setMessage(error instanceof Error ? error.message : 'Unable to create vault remittance.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleWithdrawBucket = async (bucket: RemittanceRecord['buckets'][number]) => {
+    if (!activeRemittance) return;
+    if (!senderPublicKey) {
+      setMessage('Connect the recipient Freighter wallet before withdrawing.');
+      return;
+    }
+    if (senderPublicKey !== activeRemittance.recipientAddress) {
+      setMessage('The connected Freighter wallet must match the remittance recipient address.');
+      return;
+    }
+
+    setWithdrawingBucketId(bucket.id);
+    setMessage('');
+    try {
+      const result = await withdrawVaultBucket({
+        sourcePublicKey: senderPublicKey,
+        remittanceId: activeRemittance.id,
+        bucketId: bucket.id
+      });
+      const updated: RemittanceRecord = {
+        ...activeRemittance,
+        buckets: activeRemittance.buckets.map((candidate) =>
+          candidate.id === bucket.id
+            ? {
+                ...candidate,
+                paymentStatus: 'withdrawn',
+                withdrawalHash: result.hash,
+                withdrawalExpertUrl: result.stellarExpertUrl,
+                error: undefined
+              }
+            : candidate
+        )
+      };
+      await persistAndSelect(updated);
+      setMessage(`${bucket.label} withdrawn from the Soroban vault.`);
+    } catch (error) {
+      const updated: RemittanceRecord = {
+        ...activeRemittance,
+        buckets: activeRemittance.buckets.map((candidate) =>
+          candidate.id === bucket.id
+            ? {
+                ...candidate,
+                error: error instanceof Error ? error.message : 'Withdrawal failed.'
+              }
+            : candidate
+        )
+      };
+      await persistAndSelect(updated);
+      setMessage(error instanceof Error ? error.message : 'Unable to withdraw bucket.');
+    } finally {
+      setWithdrawingBucketId('');
+    }
+  };
+
   const currentTotals = activeRemittance ? getRemittanceTotals(activeRemittance) : null;
 
   return (
@@ -246,6 +361,10 @@ function App() {
         <div className="status-item">
           <ShieldCheck size={18} />
           <span>{senderPublicKey ? `Freighter ${senderPublicKey.slice(0, 6)}...${senderPublicKey.slice(-4)}` : 'Freighter not connected'}</span>
+        </div>
+        <div className="status-item">
+          <LockKeyhole size={18} />
+          <span>{isSorobanVaultConfigured() ? 'Soroban vault configured' : 'Direct payments mode'}</span>
         </div>
         <button type="button" className="primary-button compact" onClick={handleConnectFreighter}>
           Connect Freighter
@@ -348,11 +467,28 @@ function App() {
                 <button
                   type="button"
                   className={`lock-button ${bucket.locked ? 'is-locked' : ''}`}
-                  onClick={() => updateBucket(bucket.id, { locked: !bucket.locked })}
+                  onClick={() =>
+                    updateBucket(
+                      bucket.id,
+                      bucket.locked
+                        ? { locked: false, unlockAt: undefined, releaseNote: 'Available immediately' }
+                        : { locked: true, unlockAt: bucket.unlockAt || createDefaultUnlockAt() }
+                    )
+                  }
                 >
                   {bucket.locked ? <LockKeyhole size={16} /> : <Unlock size={16} />}
                   {bucket.locked ? 'Locked' : 'Open'}
                 </button>
+                {bucket.locked ? (
+                  <input
+                    aria-label="Unlock date"
+                    type="datetime-local"
+                    value={bucket.unlockAt || ''}
+                    onChange={(event) => updateBucket(bucket.id, { unlockAt: event.target.value })}
+                  />
+                ) : (
+                  <div className="computed">Immediate</div>
+                )}
                 <input
                   aria-label="Release note"
                   value={bucket.releaseNote}
@@ -414,29 +550,60 @@ function App() {
                 </div>
               </div>
 
+              {activeRemittance.vaultExpertUrl && (
+                <a className="vault-link" href={activeRemittance.vaultExpertUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={16} />
+                  Vault remittance transaction
+                </a>
+              )}
+
               <div className="proof-list">
-                {activeRemittance.buckets.map((bucket) => (
-                  <article className="proof-item" key={bucket.id}>
-                    <div>
-                      <strong>{bucket.label}</strong>
-                      <span>Memo: {bucket.memo || memoForBucket(bucket.label)}</span>
-                    </div>
-                    <div>
-                      <strong>{formatXlm(bucket.amount)} XLM</strong>
-                      <span>{bucket.locked ? bucket.releaseNote : 'Available immediately'}</span>
-                    </div>
-                    <span className={`payment-chip ${bucket.paymentStatus}`}>{bucket.paymentStatus}</span>
-                    {bucket.stellarExpertUrl ? (
-                      <a className="icon-link" href={bucket.stellarExpertUrl} target="_blank" rel="noreferrer">
-                        <ExternalLink size={16} />
-                        Stellar Expert
-                      </a>
-                    ) : (
-                      <span className="muted">No proof yet</span>
-                    )}
-                    {bucket.error && <p className="error-text">{bucket.error}</p>}
-                  </article>
-                ))}
+                {activeRemittance.buckets.map((bucket) => {
+                  const canWithdraw =
+                    Boolean(activeRemittance.vaultContractId) &&
+                    bucket.paymentStatus !== 'withdrawn' &&
+                    (!bucket.unlockTimestamp || bucket.unlockTimestamp <= Math.floor(Date.now() / 1000));
+
+                  return (
+                    <article className="proof-item" key={bucket.id}>
+                      <div>
+                        <strong>{bucket.label}</strong>
+                        <span>Memo: {bucket.memo || memoForBucket(bucket.label)}</span>
+                      </div>
+                      <div>
+                        <strong>{formatXlm(bucket.amount)} XLM</strong>
+                        <span>{bucket.locked ? bucket.releaseNote : 'Available immediately'}</span>
+                      </div>
+                      <span className={`payment-chip ${bucket.paymentStatus}`}>{bucket.paymentStatus}</span>
+                      {bucket.stellarExpertUrl ? (
+                        <a className="icon-link" href={bucket.stellarExpertUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={16} />
+                          Stellar Expert
+                        </a>
+                      ) : (
+                        <span className="muted">No proof yet</span>
+                      )}
+                      {activeRemittance.vaultContractId && (
+                        <button
+                          type="button"
+                          className="secondary-button compact"
+                          disabled={!canWithdraw || withdrawingBucketId === bucket.id}
+                          onClick={() => handleWithdrawBucket(bucket)}
+                        >
+                          {withdrawingBucketId === bucket.id ? <Loader2 className="spin" size={16} /> : <Unlock size={16} />}
+                          Withdraw
+                        </button>
+                      )}
+                      {bucket.withdrawalExpertUrl && (
+                        <a className="icon-link" href={bucket.withdrawalExpertUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={16} />
+                          Withdrawal
+                        </a>
+                      )}
+                      {bucket.error && <p className="error-text">{bucket.error}</p>}
+                    </article>
+                  );
+                })}
               </div>
 
               <div className="action-row">
@@ -448,10 +615,10 @@ function App() {
                   type="button"
                   className="primary-button"
                   disabled={isSubmitting}
-                  onClick={handleSubmitPayments}
+                  onClick={isSorobanVaultConfigured() ? handleCreateVaultRemittance : handleSubmitPayments}
                 >
                   {isSubmitting ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-                  Submit Testnet
+                  {isSorobanVaultConfigured() ? 'Create Vault' : 'Submit Testnet'}
                 </button>
               </div>
             </>

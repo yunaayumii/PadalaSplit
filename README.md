@@ -29,7 +29,7 @@ We built PadalaSplit to help OFWs send money home with context, not just value. 
 - Recipient dashboard — view received amounts grouped by purpose.
 - Transaction proof — display transaction hashes and Stellar Expert links for verification.
 - Demo mode — prefilled remittance data for a smooth hackathon presentation.
-- Locked bucket simulation — show protected funds in the UI while keeping on-chain enforcement as a future Soroban or backend feature.
+- Locked bucket vault — optional Soroban contract flow that escrows bucket funds and lets the recipient withdraw after each unlock time.
 
 See `docs/features.md` for the full MVP feature plan and future roadmap.
 
@@ -38,6 +38,7 @@ See `docs/features.md` for the full MVP feature plan and future roadmap.
 - Frontend: Vite, React, TypeScript
 - Backend: Supabase for persisted demo history, with browser local storage fallback when Supabase is not configured
 - Blockchain: Stellar Testnet, XLM, Stellar SDK, Horizon API
+- Smart contract: Soroban vault contract for time-locked XLM buckets
 - Wallet: Freighter for Testnet transaction signing
 - Other tools: Stellar Expert for transaction verification
 
@@ -63,6 +64,13 @@ Required for Supabase persistence:
 
 If Supabase is not configured, the app still runs with browser local storage for demo history.
 
+Optional for Soroban locked buckets:
+
+- `VITE_SOROBAN_RPC_URL`
+- `VITE_PADALASPLIT_VAULT_CONTRACT_ID`
+
+If the vault contract ID is not configured, the app keeps using the original direct Stellar Testnet payment flow.
+
 ### Supabase Setup
 
 Run the SQL in `docs/supabase-schema.sql` in the Supabase SQL editor. The MVP uses demo session IDs instead of full authentication, so the included policies are intentionally permissive for hackathon demo use only.
@@ -70,6 +78,10 @@ Run the SQL in `docs/supabase-schema.sql` in the Supabase SQL editor. The MVP us
 ### Freighter Setup
 
 Install the Freighter browser extension, switch it to Stellar Testnet, and fund the sender account with Testnet XLM before submitting real split payments. Demo proof mode works without Freighter but only generates mock hashes.
+
+### Soroban Vault Setup
+
+See `docs/soroban-vault.md` to build, deploy, initialize, and configure the locked-bucket vault contract.
 
 ## 🌐 Deployment
 

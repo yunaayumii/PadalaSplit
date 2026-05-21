@@ -1,5 +1,13 @@
 export type BucketStatus = 'available' | 'locked';
-export type PaymentStatus = 'pending' | 'submitting' | 'paid' | 'failed' | 'demo';
+export type PaymentStatus =
+  | 'pending'
+  | 'submitting'
+  | 'paid'
+  | 'failed'
+  | 'demo'
+  | 'vaulted'
+  | 'withdrawable'
+  | 'withdrawn';
 export type SplitMode = 'percentage' | 'amount';
 
 export type BucketDraft = {
@@ -9,14 +17,19 @@ export type BucketDraft = {
   amount: number;
   locked: boolean;
   releaseNote: string;
+  unlockAt?: string;
 };
 
 export type BucketRecord = BucketDraft & {
   memo: string;
   status: BucketStatus;
   paymentStatus: PaymentStatus;
+  contractBucketId?: string;
+  unlockTimestamp?: number;
   transactionHash?: string;
   stellarExpertUrl?: string;
+  withdrawalHash?: string;
+  withdrawalExpertUrl?: string;
   error?: string;
 };
 
@@ -30,6 +43,9 @@ export type RemittanceRecord = {
   totalAmount: number;
   status: 'draft' | 'ready' | 'submitting' | 'partial' | 'completed' | 'demo';
   createdAt: string;
+  vaultContractId?: string;
+  vaultTransactionHash?: string;
+  vaultExpertUrl?: string;
   buckets: BucketRecord[];
 };
 
