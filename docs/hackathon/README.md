@@ -17,4 +17,4 @@ Future agents should read the files in this folder directly instead of refetchin
 ## Included References
 
 - `readme-format.md` - copied README structure required for hackathon project submissions.
-- `stellar-soroban-mainnet-guide.md` - local summary and source link for the Stellar Hackathon PH 2026 deployment guide.
+- `stellar-soroban-mainnet-guide.md` - full copied Stellar Hackathon PH 2026 Soroban deployment guide for local reference.
