@@ -39,8 +39,10 @@ rustup target add wasm32v1-none
 ### 3. Install Stellar CLI
 
 ```bash
-cargo install --locked stellar-cli --features opt
+cargo install --locked stellar-cli
 ```
+
+> **Note:** Older versions of this guide used `cargo install --locked stellar-cli --features opt`. If Cargo reports that `stellar-cli` does not contain the `opt` feature, use the command above instead.
 
 ### 4. Verify Installation
 

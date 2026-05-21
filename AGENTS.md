@@ -33,6 +33,8 @@ Group feature code by domain when possible, for example `src/remittances/`, `src
 
 Before planning major work, check the copied local references in `docs/hackathon/` for hackathon setup guides, checkpoint rules, and submission requirements. Use those local files as the default source of truth instead of fetching remote GitHub files again.
 
+Before planning feature work, also check `local-context/FEATURES.md`. It is the current source of truth for planned PadalaSplit features, recommended 8-hour MVP scope, demo mode, remittance protection ideas, and future backlog.
+
 ## Build, Test, and Development Commands
 
 No build system is committed yet. Add commands to this section when a framework or toolchain is introduced. Prefer standard scripts such as:
@@ -48,6 +50,8 @@ Document required environment variables in `.env.example`, not in this file.
 ## Stellar Integration Notes
 
 The MVP should use Stellar as the payment and verification layer. Each bucket is represented by a separate Testnet payment, such as 40 XLM for groceries, 30 XLM for tuition, 20 XLM for bills, and 10 XLM for emergency savings. Save every transaction hash with its bucket label and expose a Stellar Expert verification link.
+
+Protection features such as locked buckets, scheduled releases, and sender approval are product goals. For the 8-hour MVP, implement locked buckets as a UI simulation unless a later task explicitly adds Soroban contracts, backend automation, app-controlled vaults, or direct-to-biller payment enforcement.
 
 Future versions may support stablecoins, PHP-pegged assets, wallet integrations, and Soroban-based allocation rules.
 

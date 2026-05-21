@@ -29,16 +29,12 @@ pnpm-debug.log*
 .stellar/
 soroban-identity/
 
-# Local agent and editor state
-AGENTS.local.md
-NOTES.local.md
+# Local tool state
 local-context/
 .codex/
 .claude/
 .cursor/
 .windsurf/
-.vscode/
-.idea/
 
 # OS files
 .DS_Store

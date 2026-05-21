@@ -28,6 +28,8 @@ We built PadalaSplit to help OFWs send money home with context, not just value. 
 - Stellar Testnet payments — send separate XLM payments for each bucket using Stellar transaction memos.
 - Recipient dashboard — view received amounts grouped by purpose.
 - Transaction proof — display transaction hashes and Stellar Expert links for verification.
+- Demo mode — prefilled remittance data for a smooth hackathon presentation.
+- Locked bucket simulation — show protected funds in the UI while keeping on-chain enforcement as a future Soroban or backend feature.
 
 ## 🛠️ Tech Stack
 
