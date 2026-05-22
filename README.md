@@ -92,8 +92,8 @@ PadalaSplit’s judge-facing demo should use the Soroban vault as the primary pa
 
 | Value | Placeholder |
 |---|---|
-| Vercel app URL | `<VERCEL_APP_URL>` |
-| Testnet vault contract ID | `<VAULT_CONTRACT_ID>` |
+| Vercel app URL | `https://padalasplit-testnet.vercel.app/` |
+| Testnet vault contract ID | `CBZ5PWU5NYF4BNHYXEAJD3CU6WPBK7TZ225V6XZMBKQMPWOH44K7QN7L` |
 | Funded recipient public key | `<FUNDED_RECIPIENT_PUBLIC_KEY>` |
 | Vault creation transaction hash | `<VAULT_CREATION_TX_HASH>` |
 | Withdrawal transaction hash | `<WITHDRAWAL_TX_HASH>` |
@@ -103,10 +103,10 @@ PadalaSplit’s judge-facing demo should use the Soroban vault as the primary pa
 1. Configure Vercel environment variables:
    - `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, if using Supabase persistence.
    - `VITE_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org`.
-   - `VITE_PADALASPLIT_VAULT_CONTRACT_ID=<VAULT_CONTRACT_ID>`.
+   - `VITE_PADALASPLIT_VAULT_CONTRACT_ID=CBZ5PWU5NYF4BNHYXEAJD3CU6WPBK7TZ225V6XZMBKQMPWOH44K7QN7L`.
    - `VITE_DEMO_RECIPIENT_ADDRESS=<FUNDED_RECIPIENT_PUBLIC_KEY>`.
 2. Configure funded Testnet sender and recipient wallets in Freighter. Keep all secret keys and funded account credentials outside the repo.
-3. Create a Vercel preview and open `<VERCEL_APP_URL>`.
+3. Create a Vercel preview and open `https://padalasplit-testnet.vercel.app/`.
 4. Connect the sender wallet, load the demo, preview the remittance, and click `Create Soroban Vault`.
 5. Switch Freighter to the recipient wallet and open the recipient dashboard.
 6. Withdraw an unlocked bucket after its unlock time.
@@ -118,8 +118,8 @@ For contract build, deploy, and init commands, follow `docs/soroban-vault.md`.
 
 ### Testnet
 
-- App URL: `<VERCEL_APP_URL>`
-- Vault Contract ID: `<VAULT_CONTRACT_ID>`
+- App URL: `https://padalasplit-testnet.vercel.app/`
+- Vault Contract ID: `CBZ5PWU5NYF4BNHYXEAJD3CU6WPBK7TZ225V6XZMBKQMPWOH44K7QN7L`
 - Funded Recipient Public Key: `<FUNDED_RECIPIENT_PUBLIC_KEY>`
 - Vault Creation Transaction: `<VAULT_CREATION_TX_HASH>`
 - Withdrawal Transaction: `<WITHDRAWAL_TX_HASH>`
@@ -127,12 +127,14 @@ For contract build, deploy, and init commands, follow `docs/soroban-vault.md`.
 
 ### Mainnet
 
-- Contract / App Address: Not yet deployed
+- App URL: `https://padala-split.vercel.app`
+- Contract / App Address: Not yet deployed (Fallback Simulation Mode Active)
 - 📸 Screenshot — Stellar Expert (Mainnet): Not yet available
 
 ## 🎥 Demo
 
-- 🔗 Live App: To be added
+- 🔗 Live App (Mainnet): [padala-split.vercel.app](https://padala-split.vercel.app)
+- 🧪 Staging App (Testnet): [padalasplit-testnet.vercel.app](https://padalasplit-testnet.vercel.app/)
 - 🎬 Demo Video: To be added
 - 🖼️ Pitch Deck: To be added
 
@@ -140,8 +142,8 @@ For contract build, deploy, and init commands, follow `docs/soroban-vault.md`.
 
 | Name | Role | GitHub |
 |---|---|---|
-| Yuan Rubio | Project Lead / Full-stack Developer | To be added |
-| Rex Jumawid | Stellar Integration / Backend Developer | To be added |
+| Yuan Rubio | Project Lead / Full-stack Developer | [@yunaayumii](https://github.com/yunaayumii) |
+| Rex Jumawid | Stellar Integration / Backend Developer | [@rexjumawid](https://github.com/rexjumawid) |
 
 ## 📜 License
 
