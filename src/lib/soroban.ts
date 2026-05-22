@@ -3,7 +3,6 @@ import {
   Address,
   BASE_FEE,
   Contract,
-  Networks,
   TransactionBuilder,
   hash,
   nativeToScVal,
@@ -13,10 +12,15 @@ import {
 } from '@stellar/stellar-sdk';
 import { Buffer } from 'buffer';
 import { logDebug, logError, logInfo, logWarn } from './logger';
+import {
+  NETWORK_PASSPHRASE,
+  NETWORK_PILL_LABEL,
+  SOROBAN_RPC_URL,
+  getStellarExpertUrl
+} from './network';
 import { describeFreighterTransactionXdr, signFreighterTransaction } from './stellar';
 import type { BucketRecord, RemittanceRecord } from './types';
 
-const SOROBAN_RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const VAULT_CONTRACT_ID = import.meta.env.VITE_PADALASPLIT_VAULT_CONTRACT_ID || '';
 
 const encoder = new TextEncoder();
@@ -24,7 +28,7 @@ const encoder = new TextEncoder();
 export const isSorobanVaultConfigured = () => Boolean(SOROBAN_RPC_URL && VAULT_CONTRACT_ID);
 
 export const getSorobanExpertUrl = (hashValue: string) =>
-  `https://stellar.expert/explorer/testnet/tx/${hashValue}`;
+  getStellarExpertUrl(hashValue);
 
 export const remittanceContractId = (remittanceId: string) => bytes32Hex(`remittance:${remittanceId}`);
 
@@ -278,7 +282,7 @@ const submitVaultCall = async (
 
     onProgress?.({ phase: 'signing', message: 'Waiting for Freighter signature.' });
     const signedXdr = await signFreighterTransaction(preparedXdr, sourcePublicKey);
-    const signedTransaction = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
+    const signedTransaction = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
     const sendResult = await server.sendTransaction(signedTransaction);
     logInfo('soroban.submit', 'Soroban transaction sent to RPC.', {
       method,
@@ -298,7 +302,7 @@ const submitVaultCall = async (
 
     onProgress?.({
       phase: 'submitted',
-      message: 'Transaction submitted. Waiting for Testnet confirmation.',
+      message: `Transaction submitted. Waiting for ${NETWORK_PILL_LABEL} confirmation.`,
       hash: sendResult.hash
     });
 
@@ -341,7 +345,7 @@ const waitForSorobanTransaction = async (
   }
 
   logError('soroban.confirm', 'Timed out waiting for Soroban transaction confirmation.', undefined, { txHash });
-  throw new Error('Timed out waiting for Soroban transaction confirmation. The transaction may still confirm on Testnet; check the Stellar Expert link if a hash is shown.');
+  throw new Error(`Timed out waiting for Soroban transaction confirmation. The transaction may still confirm on ${NETWORK_PILL_LABEL}; check the Stellar Expert link if a hash is shown.`);
 };
 
 const buildVaultTransaction = async (sourcePublicKey: string | undefined, method: string, args: xdr.ScVal[]) => {
@@ -357,7 +361,7 @@ const buildVaultTransaction = async (sourcePublicKey: string | undefined, method
 
   const transaction = new TransactionBuilder(sourceAccount, {
     fee: BASE_FEE,
-    networkPassphrase: Networks.TESTNET
+    networkPassphrase: NETWORK_PASSPHRASE
   })
     .addOperation(vault.call(method, ...args))
     .setTimeout(60)

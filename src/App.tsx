@@ -38,7 +38,8 @@ import {
   type VaultProgressUpdate,
   withdrawVaultBucket
 } from './lib/soroban';
-import { connectFreighter, getStellarExpertUrl, submitBucketPayment, tryAutoConnect } from './lib/stellar';
+import { connectFreighter, submitBucketPayment, tryAutoConnect } from './lib/stellar';
+import { getStellarExpertUrl, NETWORK_LABEL, NETWORK_PILL_LABEL } from './lib/network';
 import {
   clearLogEntries,
   getLogEntries,
@@ -227,7 +228,7 @@ function App() {
       setMessage(
         isSorobanVaultConfigured()
           ? 'Remittance preview saved. Create the Soroban vault or run demo proof.'
-          : 'Remittance preview saved. Configure the vault for locked buckets, or use direct Testnet payments for unlocked buckets.'
+          : `Remittance preview saved. Configure the vault for locked buckets, or use direct ${NETWORK_PILL_LABEL} payments for unlocked buckets.`
       );
     } catch (error) {
       logError('app.createPreview', 'Unable to save remittance preview.', error);
@@ -250,7 +251,7 @@ function App() {
       setHistory([]);
       setActiveRemittance(null);
       setVaultProgress(null);
-      setMessage('Demo reset complete. Local/app history was cleared; any on-chain vault funds remain on Soroban Testnet.');
+      setMessage(`Demo reset complete. Local/app history was cleared; any on-chain vault funds remain on Soroban ${NETWORK_PILL_LABEL}.`);
     } catch (error) {
       logError('app.reset', 'Unable to clear transaction history.', error);
       setMessage(messageFromError(error, 'Unable to clear transaction history.'));
@@ -263,7 +264,7 @@ function App() {
       const publicKey = await connectFreighter();
       setSenderPublicKey(publicKey);
       window.localStorage.setItem(WALLET_STORAGE_KEY, publicKey);
-      setMessage('Freighter connected on Stellar Testnet.');
+      setMessage(`Freighter connected on ${NETWORK_LABEL}.`);
       // Reload history for the connected wallet
       await loadHistoryForWallet(publicKey);
     } catch (error) {
@@ -291,13 +292,13 @@ function App() {
 
     await persistAndSelect(updated);
     logInfo('app.demoProof', 'Generated demo proof.', { remittanceId: updated.id, bucketCount: updated.buckets.length });
-    setMessage('Demo proof generated. Use real Testnet payments for judge-verifiable hashes.');
+    setMessage(`Demo proof generated. Use real ${NETWORK_PILL_LABEL} payments for judge-verifiable hashes.`);
   };
 
   const handleSubmitPayments = async () => {
     if (!activeRemittance) return;
     if (!senderPublicKey) {
-      setMessage('Connect Freighter before submitting Testnet payments.');
+      setMessage(`Connect Freighter before submitting ${NETWORK_PILL_LABEL} payments.`);
       return;
     }
     if (activeRemittance.buckets.some((bucket) => bucket.locked)) {
@@ -386,7 +387,7 @@ function App() {
     working = { ...working, status: 'completed' };
     await persistAndSelect(working);
     logInfo('app.directPayments', 'All direct bucket payments completed.', { remittanceId: working.id });
-    setMessage('All bucket payments submitted on Stellar Testnet.');
+    setMessage(`All bucket payments submitted on ${NETWORK_LABEL}.`);
     setIsSubmitting(false);
   };
 
@@ -456,7 +457,7 @@ function App() {
       await persistAndSelect(working);
       setVaultProgress(null);
       logInfo('app.vault', 'Vault remittance completed.', { remittanceId: working.id, hash: result.hash });
-      setMessage('Vault remittance created on Soroban Testnet. Recipient can withdraw each bucket after unlock.');
+      setMessage(`Vault remittance created on Soroban ${NETWORK_PILL_LABEL}. Recipient can withdraw each bucket after unlock.`);
     } catch (error) {
       const errorMessage = messageFromError(error, 'Vault remittance failed.');
       logError('app.vault', 'Vault remittance failed.', error, {
@@ -631,7 +632,7 @@ function App() {
         <section className="landing-hero">
           <div className="landing-copy">
             <img src="/padalasplit-mark.svg" alt="" className="brand-mark" />
-            <p className="eyebrow">Stellar Testnet Remittance Vault</p>
+            <p className="eyebrow">{NETWORK_LABEL} Remittance Vault</p>
             <h1>Send money home with a purpose, not just a memo.</h1>
             <p>
               PadalaSplit turns one OFW remittance into clear household buckets for groceries, tuition, bills,
@@ -673,7 +674,7 @@ function App() {
           <article>
             <span>02</span>
             <h2>Vault</h2>
-            <p>Locked buckets are deposited into the Testnet Soroban vault for enforceable release timing.</p>
+            <p>Locked buckets are deposited into the {NETWORK_PILL_LABEL} Soroban vault for enforceable release timing.</p>
           </article>
           <article>
             <span>03</span>
@@ -699,7 +700,7 @@ function App() {
           <p>Purpose-based Stellar remittances for OFWs and Filipino families.</p>
         </div>
         <div className="hero-actions">
-          <span className="network-pill">Stellar Testnet</span>
+          <span className="network-pill">{NETWORK_LABEL}</span>
           <button type="button" className="secondary-button" onClick={() => setForm(createDemoForm(senderPublicKey || window.localStorage.getItem(WALLET_STORAGE_KEY) || undefined))}>
             Load Demo
           </button>
@@ -747,7 +748,7 @@ function App() {
         </div>
         <div className="status-item">
           <CheckCircle2 size={18} />
-          <span>{proofAvailable ? 'Testnet proof available' : 'No Testnet proof yet'}</span>
+          <span>{proofAvailable ? `${NETWORK_PILL_LABEL} proof available` : `No ${NETWORK_PILL_LABEL} proof yet`}</span>
         </div>
         <button type="button" className="primary-button compact" onClick={handleConnectFreighter}>
           Connect Freighter
@@ -969,12 +970,12 @@ function App() {
                 </div>
                 <p>
                   {isSubmitting
-                    ? vaultProgress?.message || 'Waiting for Freighter, RPC simulation, and Testnet confirmation.'
+                    ? vaultProgress?.message || `Waiting for Freighter, RPC simulation, and ${NETWORK_PILL_LABEL} confirmation.`
                     : activeIsVaultBacked
                       ? 'Vault is already created. Use the recipient dashboard for withdrawals.'
                       : vaultConfigured
                         ? 'Create a Soroban vault to enforce locked buckets. Vault buckets change to vaulted, then withdrawable.'
-                        : 'Direct Testnet payments are available only when every bucket is unlocked. Configure the vault for locked buckets.'}
+                        : `Direct ${NETWORK_PILL_LABEL} payments are available only when every bucket is unlocked. Configure the vault for locked buckets.`}
                 </p>
                 {vaultProgress?.hash && (
                   <a className="vault-link inline" href={getStellarExpertUrl(vaultProgress.hash)} target="_blank" rel="noreferrer">

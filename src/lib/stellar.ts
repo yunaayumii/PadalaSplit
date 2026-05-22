@@ -3,7 +3,6 @@ import {
   BASE_FEE,
   Horizon,
   Memo,
-  Networks,
   Operation,
   TransactionBuilder,
   xdr
@@ -16,13 +15,13 @@ import {
   signTransaction
 } from '@stellar/freighter-api';
 import { logDebug, logError, logInfo } from './logger';
-
-const HORIZON_URL = import.meta.env.VITE_STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
-const TESTNET_NETWORK = 'TESTNET';
-
-export const STELLAR_EXPERT_TESTNET_BASE = 'https://stellar.expert/explorer/testnet/tx';
-
-export const getStellarExpertUrl = (hash: string) => `${STELLAR_EXPERT_TESTNET_BASE}/${hash}`;
+import {
+  FREIGHTER_NETWORK_NAME,
+  HORIZON_URL,
+  NETWORK_PASSPHRASE,
+  NETWORK_PILL_LABEL,
+  getStellarExpertUrl
+} from './network';
 
 type FreighterApiError =
   | string
@@ -54,7 +53,7 @@ export const describeFreighterTransactionXdr = (transactionXdr: string): Freight
   try {
     const envelope = xdr.TransactionEnvelope.fromXDR(transactionXdr, 'base64');
     const envelopeSwitch = envelope.switch() as { name?: string; value?: number };
-    const transaction = TransactionBuilder.fromXDR(transactionXdr, Networks.TESTNET) as unknown as {
+    const transaction = TransactionBuilder.fromXDR(transactionXdr, NETWORK_PASSPHRASE) as unknown as {
       operations?: Array<{ type?: string; auth?: xdr.SorobanAuthorizationEntry[] }>;
       innerTransaction?: {
         operations?: Array<{ type?: string; auth?: xdr.SorobanAuthorizationEntry[] }>;
@@ -101,7 +100,7 @@ const formatFreighterError = (
 
     const operations = transactionDetails.operationTypes.join(', ') || 'none';
     const authTypes = transactionDetails.sorobanAuthTypes.join(', ') || 'none';
-    return `${message}. PadalaSplit generated a valid ${transactionDetails.envelopeType} XDR locally (${operations}; auth: ${authTypes}). This points to Freighter's extension XDR parser/version rather than the contract or RPC request. Update or reload the Freighter browser extension and retry on Testnet.`;
+    return `${message}. PadalaSplit generated a valid ${transactionDetails.envelopeType} XDR locally (${operations}; auth: ${authTypes}). This points to Freighter's extension XDR parser/version rather than the contract or RPC request. Update or reload the Freighter browser extension and retry on ${NETWORK_PILL_LABEL}.`;
   }
 
   return message;
@@ -167,7 +166,7 @@ export const connectFreighter = async () => {
   return publicKey;
 };
 
-export const ensureFreighterTestnet = async () => {
+export const ensureFreighterNetwork = async () => {
   const details = await getNetworkDetails();
   logDebug('freighter.network', 'Read Freighter network details.', {
     network: details.network,
@@ -180,16 +179,16 @@ export const ensureFreighterTestnet = async () => {
     throw new Error(details.error.message || 'Unable to read Freighter network details.');
   }
 
-  if (details.network && details.network !== TESTNET_NETWORK) {
+  if (details.network && details.network !== FREIGHTER_NETWORK_NAME) {
     logError('freighter.network', 'Freighter is on the wrong network.', undefined, { currentNetwork: details.network });
-    throw new Error(`Switch Freighter to Testnet before signing. Current network: ${details.network}.`);
+    throw new Error(`Switch Freighter to ${NETWORK_PILL_LABEL} before signing. Current network: ${details.network}.`);
   }
 
-  if (details.networkPassphrase && details.networkPassphrase !== Networks.TESTNET) {
+  if (details.networkPassphrase && details.networkPassphrase !== NETWORK_PASSPHRASE) {
     logError('freighter.network', 'Freighter is using the wrong network passphrase.', undefined, {
       networkPassphrase: details.networkPassphrase
     });
-    throw new Error('Freighter is not using the Stellar Testnet passphrase. Switch Freighter to Testnet and retry.');
+    throw new Error(`Freighter is not using the ${NETWORK_PILL_LABEL} passphrase. Switch Freighter to ${NETWORK_PILL_LABEL} and retry.`);
   }
 };
 
@@ -209,11 +208,11 @@ export const signFreighterTransaction = async (transactionXdr: string, address: 
     throw new Error(`PadalaSplit generated unreadable transaction XDR: ${transactionDetails.localError}`);
   }
 
-  await ensureFreighterTestnet();
+  await ensureFreighterNetwork();
   const signedResult = (await signTransaction(transactionXdr, {
     address,
-    network: TESTNET_NETWORK,
-    networkPassphrase: Networks.TESTNET
+    network: FREIGHTER_NETWORK_NAME,
+    networkPassphrase: NETWORK_PASSPHRASE
   } as FreighterSignOptions)) as FreighterSignResult | string;
 
   if (typeof signedResult !== 'string' && signedResult.error) {
@@ -258,7 +257,7 @@ export const submitBucketPayment = async ({
   const account = await server.loadAccount(sourcePublicKey);
   const transaction = new TransactionBuilder(account, {
     fee: BASE_FEE,
-    networkPassphrase: Networks.TESTNET
+    networkPassphrase: NETWORK_PASSPHRASE
   })
     .addOperation(
       Operation.payment({
@@ -272,7 +271,7 @@ export const submitBucketPayment = async ({
     .build();
 
   const signedXdr = await signFreighterTransaction(transaction.toXDR(), sourcePublicKey);
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
+  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
   const response = await server.submitTransaction(signedTransaction);
 
   logInfo('stellar.payment', 'Bucket payment submitted.', {
