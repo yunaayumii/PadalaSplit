@@ -82,13 +82,13 @@ Restart Vite after changing environment variables:
 npm run dev
 ```
 
-When `VITE_PADALASPLIT_VAULT_CONTRACT_ID` is set, the app changes the payment action from direct Stellar payments to `Create Vault`.
+When `VITE_PADALASPLIT_VAULT_CONTRACT_ID` is set, the app changes the payment action from direct Stellar payments to `Create Soroban Vault`.
 
 ## Demo Flow
 
 1. Connect the sender wallet in Freighter on Testnet.
 2. Create a remittance preview.
-3. Click `Create Vault` to deposit all bucket funds into the vault contract.
+3. Click `Create Soroban Vault` to deposit all bucket funds into the vault contract.
 4. Connect the recipient wallet in Freighter.
 5. Withdraw each bucket after its unlock timestamp.
 

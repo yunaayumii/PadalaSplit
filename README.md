@@ -68,8 +68,9 @@ Optional for Soroban locked buckets:
 
 - `VITE_SOROBAN_RPC_URL`
 - `VITE_PADALASPLIT_VAULT_CONTRACT_ID`
+- `VITE_DEMO_RECIPIENT_ADDRESS`
 
-If the vault contract ID is not configured, the app keeps using the original direct Stellar Testnet payment flow.
+If the vault contract ID is not configured, the app only allows direct Stellar Testnet payments for remittances where every bucket is unlocked. Locked buckets are intended to be enforced through the Soroban vault.
 
 ### Supabase Setup
 
@@ -83,11 +84,45 @@ Install the Freighter browser extension, switch it to Stellar Testnet, and fund 
 
 See `docs/soroban-vault.md` to build, deploy, initialize, and configure the locked-bucket vault contract.
 
+## 🧪 Soroban-First Demo Runbook
+
+PadalaSplit’s judge-facing demo should use the Soroban vault as the primary path. Direct payments are kept as a fallback only for unlocked buckets.
+
+### Deployment Values To Fill
+
+| Value | Placeholder |
+|---|---|
+| Vercel app URL | `<VERCEL_APP_URL>` |
+| Testnet vault contract ID | `<VAULT_CONTRACT_ID>` |
+| Funded recipient public key | `<FUNDED_RECIPIENT_PUBLIC_KEY>` |
+| Vault creation transaction hash | `<VAULT_CREATION_TX_HASH>` |
+| Withdrawal transaction hash | `<WITHDRAWAL_TX_HASH>` |
+
+### Demo Steps
+
+1. Configure Vercel environment variables:
+   - `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, if using Supabase persistence.
+   - `VITE_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org`.
+   - `VITE_PADALASPLIT_VAULT_CONTRACT_ID=<VAULT_CONTRACT_ID>`.
+   - `VITE_DEMO_RECIPIENT_ADDRESS=<FUNDED_RECIPIENT_PUBLIC_KEY>`.
+2. Configure funded Testnet sender and recipient wallets in Freighter. Keep all secret keys and funded account credentials outside the repo.
+3. Create a Vercel preview and open `<VERCEL_APP_URL>`.
+4. Connect the sender wallet, load the demo, preview the remittance, and click `Create Soroban Vault`.
+5. Switch Freighter to the recipient wallet and open the recipient dashboard.
+6. Withdraw an unlocked bucket after its unlock time.
+7. Open the Stellar Expert proof links for `<VAULT_CREATION_TX_HASH>` and `<WITHDRAWAL_TX_HASH>`.
+
+For contract build, deploy, and init commands, follow `docs/soroban-vault.md`.
+
 ## 🌐 Deployment
 
 ### Testnet
 
-- Contract / App Address: Not required for the payment-operation MVP
+- App URL: `<VERCEL_APP_URL>`
+- Vault Contract ID: `<VAULT_CONTRACT_ID>`
+- Funded Recipient Public Key: `<FUNDED_RECIPIENT_PUBLIC_KEY>`
+- Vault Creation Transaction: `<VAULT_CREATION_TX_HASH>`
+- Withdrawal Transaction: `<WITHDRAWAL_TX_HASH>`
 - 📸 Screenshot — Stellar Expert (Testnet): To be added
 
 ### Mainnet

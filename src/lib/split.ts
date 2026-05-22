@@ -42,7 +42,10 @@ export const DEFAULT_BUCKETS: BucketDraft[] = [
   }
 ];
 
-export const DEMO_RECIPIENT_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+export const DEFAULT_DEMO_RECIPIENT_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+export const getDemoRecipientAddress = () =>
+  import.meta.env.VITE_DEMO_RECIPIENT_ADDRESS?.trim() || DEFAULT_DEMO_RECIPIENT_ADDRESS;
 
 export const createDefaultUnlockAt = (minutesFromNow = 3) => {
   const date = new Date(Date.now() + minutesFromNow * 60 * 1000);
@@ -53,7 +56,7 @@ export const createDefaultUnlockAt = (minutesFromNow = 3) => {
 export const createDemoForm = (): RemittanceFormState => ({
   senderName: 'Maria Santos',
   recipientName: 'Ana Santos',
-  recipientAddress: DEMO_RECIPIENT_ADDRESS,
+  recipientAddress: getDemoRecipientAddress(),
   totalAmount: 100,
   splitMode: 'percentage',
   buckets: DEFAULT_BUCKETS.map((bucket) => ({
@@ -191,10 +194,25 @@ export const getRemittanceTotals = (remittance: RemittanceRecord) => {
     )
     .reduce((sum, bucket) => sum + bucket.amount, 0);
   const lockedTotal = remittance.buckets.filter((bucket) => bucket.locked).reduce((sum, bucket) => sum + bucket.amount, 0);
+  const vaultedTotal = remittance.buckets
+    .filter((bucket) => bucket.paymentStatus === 'vaulted')
+    .reduce((sum, bucket) => sum + bucket.amount, 0);
+  const withdrawableTotal = remittance.buckets
+    .filter((bucket) => bucket.paymentStatus === 'withdrawable')
+    .reduce((sum, bucket) => sum + bucket.amount, 0);
+  const withdrawnTotal = remittance.buckets
+    .filter((bucket) => bucket.paymentStatus === 'withdrawn')
+    .reduce((sum, bucket) => sum + bucket.amount, 0);
 
   return {
     paidTotal: roundXlm(paidTotal),
     lockedTotal: roundXlm(lockedTotal),
-    availableTotal: roundXlm(remittance.totalAmount - lockedTotal)
+    availableTotal: roundXlm(remittance.totalAmount - lockedTotal),
+    vaultedTotal: roundXlm(vaultedTotal),
+    withdrawableTotal: roundXlm(withdrawableTotal),
+    withdrawnTotal: roundXlm(withdrawnTotal)
   };
 };
+
+export const canSubmitDirectPayments = (remittance: RemittanceRecord, isVaultConfigured: boolean) =>
+  isVaultConfigured || !remittance.buckets.some((bucket) => bucket.locked);

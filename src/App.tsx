@@ -9,6 +9,7 @@ import {
   Loader2,
   LockKeyhole,
   Plus,
+  RotateCcw,
   Send,
   ShieldCheck,
   Trash2,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import {
   calculateBuckets,
+  canSubmitDirectPayments,
   createDefaultUnlockAt,
   createDemoForm,
   createRemittanceRecord,
@@ -158,7 +160,11 @@ function App() {
     try {
       const remittance = createRemittanceRecord(nextForm, sessionId, senderPublicKey || undefined);
       await persistAndSelect(remittance);
-      setMessage('Remittance preview saved. Submit Testnet payments or run demo proof.');
+      setMessage(
+        isSorobanVaultConfigured()
+          ? 'Remittance preview saved. Create the Soroban vault or run demo proof.'
+          : 'Remittance preview saved. Configure the vault for locked buckets, or use direct Testnet payments for unlocked buckets.'
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save remittance.');
     } finally {
@@ -178,7 +184,7 @@ function App() {
       setHistory([]);
       setActiveRemittance(null);
       setVaultProgress(null);
-      setMessage('Transaction history cleared for this demo session. Reloads now start with a clean slate.');
+      setMessage('Demo reset complete. Local/app history was cleared; any on-chain vault funds remain on Soroban Testnet.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to clear transaction history.');
     }
@@ -447,16 +453,23 @@ function App() {
   };
 
   const currentTotals = activeRemittance ? getRemittanceTotals(activeRemittance) : null;
-  const hasLockedBuckets = activeRemittance?.buckets.some((bucket) => bucket.locked) || false;
   const activeIsVaultBacked = activeRemittance ? isVaultBacked(activeRemittance) : false;
   const activeIsComplete = activeRemittance?.status === 'completed' || activeRemittance?.status === 'demo';
-  const directPaymentsBlocked = hasLockedBuckets && !isSorobanVaultConfigured();
+  const vaultConfigured = isSorobanVaultConfigured();
+  const proofAvailable = history.some(
+    (remittance) =>
+      Boolean(getVaultProofUrl(remittance)) ||
+      remittance.buckets.some(
+        (bucket) => bucket.paymentStatus !== 'demo' && Boolean(bucket.stellarExpertUrl || bucket.withdrawalExpertUrl)
+      )
+  );
+  const directPaymentsBlocked = activeRemittance ? !canSubmitDirectPayments(activeRemittance, vaultConfigured) : false;
   const submitDisabled = isSubmitting || directPaymentsBlocked || activeIsComplete || activeIsVaultBacked;
   const submitButtonLabel = activeIsVaultBacked
     ? 'Vault Created'
-    : isSorobanVaultConfigured()
-      ? 'Create Vault'
-      : 'Submit Testnet';
+    : vaultConfigured
+      ? 'Create Soroban Vault'
+      : 'Submit Direct Payments';
   const senderHistory = history.filter((remittance) => !senderPublicKey || remittance.senderPublicKey === senderPublicKey);
   const recipientHistory = history.filter((remittance) => !senderPublicKey || remittance.recipientAddress === senderPublicKey);
   const visibleHistory = activeView === 'sender' ? senderHistory : recipientHistory;
@@ -474,7 +487,8 @@ function App() {
             <h1>Send money home with a purpose, not just a memo.</h1>
             <p>
               PadalaSplit turns one OFW remittance into clear household buckets for groceries, tuition, bills,
-              emergency funds, and savings. Locked buckets use a Soroban vault instead of direct wallet payments.
+              emergency funds, and savings. Locked buckets are enforceable through a Soroban vault; direct wallet
+              payments are only a fallback for unlocked buckets.
             </p>
             <div className="landing-actions">
               <button type="button" className="primary-button" onClick={() => enterApp('sender')}>
@@ -498,7 +512,7 @@ function App() {
               <li><span>Bills vault</span><strong>20 XLM</strong></li>
               <li><span>Emergency vault</span><strong>10 XLM</strong></li>
             </ul>
-            <p>Direct payments become paid. Soroban locked buckets become vaulted, then withdrawable.</p>
+            <p>Soroban vault buckets become vaulted, then withdrawable. Direct payments are fallback proof for unlocked buckets.</p>
           </div>
         </section>
 
@@ -511,7 +525,7 @@ function App() {
           <article>
             <span>02</span>
             <h2>Vault</h2>
-            <p>Locked buckets are deposited into the Testnet Soroban contract.</p>
+            <p>Locked buckets are deposited into the Testnet Soroban vault for enforceable release timing.</p>
           </article>
           <article>
             <span>03</span>
@@ -573,19 +587,19 @@ function App() {
       <section className="status-row">
         <div className="status-item">
           <Database size={18} />
-          <span>{isSupabaseConfigured() ? 'Supabase connected' : 'Local fallback storage'}</span>
+          <span>{isSupabaseConfigured() ? 'Supabase configured' : 'Supabase local fallback'}</span>
         </div>
         <div className="status-item">
           <ShieldCheck size={18} />
-          <span>{senderPublicKey ? `Freighter ${senderPublicKey.slice(0, 6)}...${senderPublicKey.slice(-4)}` : 'Freighter not connected'}</span>
+          <span>{senderPublicKey ? `Freighter connected ${senderPublicKey.slice(0, 6)}...${senderPublicKey.slice(-4)}` : 'Freighter not connected'}</span>
         </div>
         <div className="status-item">
           <LockKeyhole size={18} />
-          <span>{isSorobanVaultConfigured() ? 'Soroban vault configured' : 'Direct payments mode'}</span>
+          <span>{vaultConfigured ? 'Soroban vault configured' : 'Soroban vault missing contract ID'}</span>
         </div>
         <div className="status-item">
           <CheckCircle2 size={18} />
-          <span>Fresh session on reload</span>
+          <span>{proofAvailable ? 'Testnet proof available' : 'No Testnet proof yet'}</span>
         </div>
         <button type="button" className="primary-button compact" onClick={handleConnectFreighter}>
           Connect Freighter
@@ -767,7 +781,9 @@ function App() {
                     ? vaultProgress?.message || 'Waiting for Freighter, RPC simulation, and Testnet confirmation.'
                     : activeIsVaultBacked
                       ? 'Vault is already created. Use the recipient dashboard for withdrawals.'
-                      : 'Create a new preview for every new vault submission. Vault buckets change to vaulted, not paid.'}
+                      : vaultConfigured
+                        ? 'Create a Soroban vault to enforce locked buckets. Vault buckets change to vaulted, then withdrawable.'
+                        : 'Direct Testnet payments are available only when every bucket is unlocked. Configure the vault for locked buckets.'}
                 </p>
                 {vaultProgress?.hash && (
                   <a className="vault-link inline" href={getStellarExpertUrl(vaultProgress.hash)} target="_blank" rel="noreferrer">
@@ -841,7 +857,7 @@ function App() {
                   type="button"
                   className="primary-button"
                   disabled={submitDisabled}
-                  onClick={isSorobanVaultConfigured() ? handleCreateVaultRemittance : handleSubmitPayments}
+                  onClick={vaultConfigured ? handleCreateVaultRemittance : handleSubmitPayments}
                 >
                   {isSubmitting ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
                   {submitButtonLabel}
@@ -849,7 +865,7 @@ function App() {
               </div>
               {directPaymentsBlocked && (
                 <p className="error-text">
-                  Locked buckets need the Soroban vault. Direct payments would send funds straight to the recipient.
+                  Locked buckets need the Soroban vault for enforceable release timing. Direct payments send funds straight to the recipient and are only a fallback for unlocked buckets.
                 </p>
               )}
             </>
@@ -877,8 +893,8 @@ function App() {
               disabled={history.length === 0 || isSubmitting}
               onClick={handleClearHistory}
             >
-              <Trash2 size={16} />
-              Clear
+              <RotateCcw size={16} />
+              Reset Demo
             </button>
           </div>
         </div>
