@@ -2,7 +2,7 @@ import { Networks } from '@stellar/stellar-sdk';
 
 export type StellarNetwork = 'testnet' | 'mainnet';
 
-const rawNetwork = (import.meta.env.VITE_STELLAR_NETWORK || 'testnet').toLowerCase();
+const rawNetwork = (import.meta.env.VITE_STELLAR_NETWORK || 'testnet').toLowerCase().trim();
 
 export const NETWORK: StellarNetwork = rawNetwork === 'mainnet' ? 'mainnet' : 'testnet';
 
@@ -15,13 +15,13 @@ export const NETWORK_PASSPHRASE: string = IS_MAINNET
 export const FREIGHTER_NETWORK_NAME = IS_MAINNET ? 'PUBLIC' : 'TESTNET';
 
 export const HORIZON_URL =
-  import.meta.env.VITE_STELLAR_HORIZON_URL ||
+  (import.meta.env.VITE_STELLAR_HORIZON_URL || '').trim() ||
   (IS_MAINNET
     ? 'https://horizon.stellar.org'
     : 'https://horizon-testnet.stellar.org');
 
 export const SOROBAN_RPC_URL =
-  import.meta.env.VITE_SOROBAN_RPC_URL ||
+  (import.meta.env.VITE_SOROBAN_RPC_URL || '').trim() ||
   (IS_MAINNET
     ? 'https://mainnet.sorobanrpc.com'
     : 'https://soroban-testnet.stellar.org');

@@ -206,16 +206,16 @@ export const recoverVaultRemittance = async (
         buckets: recovered.buckets.map((candidate) =>
           candidate.id === bucket.id
             ? {
-                ...candidate,
-                contractBucketId: bucketContractId(remittance.id, bucket.id),
-                unlockTimestamp: unlockTime,
-                paymentStatus: isWithdrawn
-                  ? ('withdrawn' as const)
-                  : canWithdrawNow
-                    ? ('withdrawable' as const)
-                    : ('vaulted' as const),
-                error: undefined
-              }
+              ...candidate,
+              contractBucketId: bucketContractId(remittance.id, bucket.id),
+              unlockTimestamp: unlockTime,
+              paymentStatus: isWithdrawn
+                ? ('withdrawn' as const)
+                : canWithdrawNow
+                  ? ('withdrawable' as const)
+                  : ('vaulted' as const),
+              error: undefined
+            }
             : candidate
         )
       };
