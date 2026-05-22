@@ -135,8 +135,8 @@ For contract build, deploy, and init commands, follow `docs/soroban-vault.md`.
 
 - 🔗 Live App (Mainnet): [padala-split.vercel.app](https://padala-split.vercel.app)
 - 🧪 Staging App (Testnet): [padalasplit-testnet.vercel.app](https://padalasplit-testnet.vercel.app/)
-- 🎬 Demo Video: To be added
-- 🖼️ Pitch Deck: To be added
+- 🎬 Demo Video: [Google Drive Link](https://drive.google.com/file/d/16VzhaQPz84EuKkOUM0agUUFZVnneCK0n/view?usp=sharing)
+- 🖼️ Pitch Deck: [Canva Presentation](https://canva.link/7dwokrs74e2a89a)
 
 ## 👨‍💻 Team
 
