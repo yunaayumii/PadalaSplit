@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { logDebug, logWarn } from './logger';
 import type { RemittanceRecord } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -84,6 +85,11 @@ const writeLocalRecords = (records: RemittanceRecord[]) => {
 export const isSupabaseConfigured = () => Boolean(getSupabase());
 
 export const saveRemittance = async (remittance: RemittanceRecord) => {
+  logDebug('storage.save', 'Saving remittance.', {
+    remittanceId: remittance.id,
+    status: remittance.status,
+    supabaseConfigured: Boolean(getSupabase())
+  });
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -91,7 +97,10 @@ export const saveRemittance = async (remittance: RemittanceRecord) => {
       if (error) {
         // If the error is about missing columns, fall through to local storage.
         if (error.code === 'PGRST204') {
-          console.warn('[PadalaSplit] Supabase table is missing columns, falling back to local storage:', error.message);
+          logWarn('storage.save', 'Supabase table is missing columns, falling back to local storage.', {
+            remittanceId: remittance.id,
+            code: error.code
+          }, error);
         } else {
           throw error;
         }
@@ -102,7 +111,10 @@ export const saveRemittance = async (remittance: RemittanceRecord) => {
       // Re-throw non-column errors
       const pgError = err as { code?: string; message?: string };
       if (pgError.code !== 'PGRST204') throw err;
-      console.warn('[PadalaSplit] Supabase table is missing columns, falling back to local storage:', pgError.message);
+      logWarn('storage.save', 'Supabase table is missing columns, falling back to local storage.', {
+        remittanceId: remittance.id,
+        code: pgError.code
+      }, err);
     }
   }
 
@@ -113,6 +125,10 @@ export const saveRemittance = async (remittance: RemittanceRecord) => {
 };
 
 export const listRemittances = async (sessionId: string) => {
+  logDebug('storage.listSession', 'Listing remittances for session.', {
+    sessionId,
+    supabaseConfigured: Boolean(getSupabase())
+  });
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -123,12 +139,12 @@ export const listRemittances = async (sessionId: string) => {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('[PadalaSplit] Supabase query failed, falling back to local storage:', error.message);
+        logWarn('storage.listSession', 'Supabase query failed, falling back to local storage.', { sessionId }, error);
       } else {
         return (data || []).map((record) => fromDatabaseRecord(record));
       }
     } catch (err) {
-      console.warn('[PadalaSplit] Supabase query failed, falling back to local storage:', err);
+      logWarn('storage.listSession', 'Supabase query failed, falling back to local storage.', { sessionId }, err);
     }
   }
 
@@ -138,6 +154,10 @@ export const listRemittances = async (sessionId: string) => {
 export const listRemittancesForWallet = async (walletAddress: string) => {
   if (!walletAddress) return [];
 
+  logDebug('storage.listWallet', 'Listing remittances for wallet.', {
+    walletAddress,
+    supabaseConfigured: Boolean(getSupabase())
+  });
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -156,7 +176,7 @@ export const listRemittancesForWallet = async (walletAddress: string) => {
 
       return records;
     } catch (err) {
-      console.warn('[PadalaSplit] Supabase wallet query failed, falling back to local storage:', err);
+      logWarn('storage.listWallet', 'Supabase wallet query failed, falling back to local storage.', { walletAddress }, err);
     }
   }
 
@@ -166,6 +186,10 @@ export const listRemittancesForWallet = async (walletAddress: string) => {
 };
 
 export const clearRemittances = async (remittanceIds: string[]) => {
+  logDebug('storage.clear', 'Clearing remittances.', {
+    count: remittanceIds.length,
+    supabaseConfigured: Boolean(getSupabase())
+  });
   if (remittanceIds.length === 0) {
     clearLocalRemittances();
     return;
@@ -176,12 +200,16 @@ export const clearRemittances = async (remittanceIds: string[]) => {
     try {
       const { error } = await supabase.from('remittances').delete().in('id', remittanceIds);
       if (error) {
-        console.warn('[PadalaSplit] Supabase delete failed, clearing local storage instead:', error.message);
+        logWarn('storage.clear', 'Supabase delete failed, clearing local storage instead.', {
+          count: remittanceIds.length
+        }, error);
       } else {
         return;
       }
     } catch (err) {
-      console.warn('[PadalaSplit] Supabase delete failed, clearing local storage instead:', err);
+      logWarn('storage.clear', 'Supabase delete failed, clearing local storage instead.', {
+        count: remittanceIds.length
+      }, err);
     }
   }
 

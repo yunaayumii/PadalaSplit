@@ -11,8 +11,9 @@ import {
   scValToNative,
   xdr
 } from '@stellar/stellar-sdk';
-import { signTransaction } from '@stellar/freighter-api';
 import { Buffer } from 'buffer';
+import { logDebug, logError, logInfo, logWarn } from './logger';
+import { describeFreighterTransactionXdr, signFreighterTransaction } from './stellar';
 import type { BucketRecord, RemittanceRecord } from './types';
 
 const SOROBAN_RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
@@ -67,6 +68,14 @@ export const createVaultRemittance = async ({
   buckets,
   onProgress
 }: CreateVaultRemittanceInput) => {
+  logInfo('soroban.createVault', 'Starting vault remittance creation.', {
+    sourcePublicKey,
+    recipient,
+    remittanceId,
+    bucketCount: buckets.length,
+    totalAmount: buckets.reduce((sum, bucket) => sum + bucket.amount, 0)
+  });
+
   const result = await submitVaultCall(
     sourcePublicKey,
     'create_remittance',
@@ -90,6 +99,12 @@ export const withdrawVaultBucket = async ({
   remittanceId,
   bucketId
 }: WithdrawVaultBucketInput) => {
+  logInfo('soroban.withdraw', 'Starting vault bucket withdrawal.', {
+    sourcePublicKey,
+    remittanceId,
+    bucketId
+  });
+
   const result = await submitVaultCall(sourcePublicKey, 'withdraw', [
     new Address(sourcePublicKey).toScVal(),
     bytes32ScVal(remittanceContractId(remittanceId)),
@@ -103,6 +118,7 @@ export const withdrawVaultBucket = async ({
 };
 
 export const readVaultBucket = async (remittanceId: string, bucketId: string) => {
+  logDebug('soroban.readBucket', 'Reading vault bucket from contract.', { remittanceId, bucketId });
   const tx = await buildVaultTransaction(undefined, 'get_bucket', [
     bytes32ScVal(remittanceContractId(remittanceId)),
     bytes32ScVal(bucketContractId(remittanceId, bucketId))
@@ -111,11 +127,13 @@ export const readVaultBucket = async (remittanceId: string, bucketId: string) =>
   const simulation = await server.simulateTransaction(tx);
 
   if ('error' in simulation) {
+    logError('soroban.readBucket', 'Soroban bucket read simulation failed.', simulation.error, { remittanceId, bucketId });
     throw new Error(simulation.error);
   }
 
   const returnValue = simulation.result?.retval;
   if (!returnValue) {
+    logError('soroban.readBucket', 'Soroban bucket read returned no value.', undefined, { remittanceId, bucketId });
     throw new Error('Vault bucket was not returned by Soroban RPC.');
   }
 
@@ -198,12 +216,20 @@ export const recoverVaultRemittance = async (
         )
       };
       anyFound = true;
-    } catch {
+    } catch (error) {
+      logWarn('soroban.recover', 'Bucket was not recoverable from chain.', {
+        remittanceId: remittance.id,
+        bucketId: bucket.id
+      }, error);
       // Bucket not found on-chain — leave its current status
     }
   }
 
   if (!anyFound) {
+    logError('soroban.recover', 'No vault data found on-chain for remittance.', undefined, {
+      remittanceId: remittance.id,
+      bucketCount: remittance.buckets.length
+    });
     throw new Error('No vault data found on-chain for this remittance. The vault may not have been created.');
   }
 
@@ -224,24 +250,49 @@ const submitVaultCall = async (
 ) => {
   try {
     const server = new rpc.Server(SOROBAN_RPC_URL);
+    logInfo('soroban.submit', 'Building Soroban transaction.', {
+      method,
+      sourcePublicKey,
+      argsCount: args.length,
+      rpcUrl: SOROBAN_RPC_URL,
+      vaultContractId: VAULT_CONTRACT_ID
+    });
     onProgress?.({ phase: 'preparing', message: 'Simulating the Soroban transaction.' });
     const tx = await buildVaultTransaction(sourcePublicKey, method, args);
-    const prepared = await server.prepareTransaction(tx);
-    onProgress?.({ phase: 'signing', message: 'Waiting for Freighter signature.' });
-    const signedResult = await signTransaction(prepared.toXDR(), {
-      address: sourcePublicKey,
-      networkPassphrase: Networks.TESTNET
+    logDebug('soroban.submit', 'Built Soroban transaction.', {
+      method,
+      transactionDetails: describeFreighterTransactionXdr(tx.toXDR()),
+      xdrLength: tx.toXDR().length
     });
 
-    if (typeof signedResult !== 'string' && signedResult.error) {
-      throw new Error(signedResult.error.message || 'Freighter declined the Soroban transaction.');
-    }
+    const prepared = await server.prepareTransaction(tx);
+    const preparedXdr = prepared.toXDR();
+    logInfo('soroban.submit', 'Prepared Soroban transaction from RPC simulation.', {
+      method,
+      fee: prepared.fee,
+      sequence: prepared.sequence,
+      transactionDetails: describeFreighterTransactionXdr(preparedXdr),
+      xdrLength: preparedXdr.length,
+      xdrPrefix: preparedXdr.slice(0, 48)
+    });
 
-    const signedXdr = typeof signedResult === 'string' ? signedResult : signedResult.signedTxXdr;
+    onProgress?.({ phase: 'signing', message: 'Waiting for Freighter signature.' });
+    const signedXdr = await signFreighterTransaction(preparedXdr, sourcePublicKey);
     const signedTransaction = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
     const sendResult = await server.sendTransaction(signedTransaction);
+    logInfo('soroban.submit', 'Soroban transaction sent to RPC.', {
+      method,
+      status: sendResult.status,
+      hash: sendResult.hash,
+      errorResultXdr: 'errorResultXdr' in sendResult ? sendResult.errorResultXdr : undefined
+    });
 
     if (sendResult.status === 'ERROR') {
+      logError('soroban.submit', 'Soroban RPC rejected transaction.', undefined, {
+        method,
+        hash: sendResult.hash,
+        errorResultXdr: 'errorResultXdr' in sendResult ? sendResult.errorResultXdr : undefined
+      });
       throw new Error('Soroban RPC rejected the transaction.');
     }
 
@@ -253,6 +304,7 @@ const submitVaultCall = async (
 
     return waitForSorobanTransaction(server, sendResult.hash, onProgress);
   } catch (error) {
+    logError('soroban.submit', 'Soroban vault call failed.', error, { method, sourcePublicKey });
     throw new Error(formatVaultError(error));
   }
 };
@@ -269,18 +321,26 @@ const waitForSorobanTransaction = async (
       hash: txHash
     });
     const result = await server.getTransaction(txHash);
+    logDebug('soroban.confirm', 'Polled Soroban transaction status.', {
+      txHash,
+      attempt: attempt + 1,
+      status: result.status
+    });
 
     if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      logInfo('soroban.confirm', 'Soroban transaction confirmed.', { txHash, attempt: attempt + 1 });
       return { hash: txHash };
     }
 
     if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+      logError('soroban.confirm', 'Soroban transaction failed on-chain.', undefined, { txHash, attempt: attempt + 1 });
       throw new Error('Soroban transaction failed on-chain.');
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 
+  logError('soroban.confirm', 'Timed out waiting for Soroban transaction confirmation.', undefined, { txHash });
   throw new Error('Timed out waiting for Soroban transaction confirmation. The transaction may still confirm on Testnet; check the Stellar Expert link if a hash is shown.');
 };
 
@@ -295,13 +355,21 @@ const buildVaultTransaction = async (sourcePublicKey: string | undefined, method
     : new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
   const vault = new Contract(VAULT_CONTRACT_ID);
 
-  return new TransactionBuilder(sourceAccount, {
+  const transaction = new TransactionBuilder(sourceAccount, {
     fee: BASE_FEE,
     networkPassphrase: Networks.TESTNET
   })
     .addOperation(vault.call(method, ...args))
     .setTimeout(60)
     .build();
+
+  logDebug('soroban.build', 'Built vault contract call.', {
+    method,
+    sourcePublicKey: sourcePublicKey || 'readonly',
+    sequence: sourceAccount.sequenceNumber()
+  });
+
+  return transaction;
 };
 
 const bucketSpecsToScVal = (buckets: VaultBucketSpec[]) =>

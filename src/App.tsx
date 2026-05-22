@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  Bug,
   CheckCircle2,
   CircleDollarSign,
   Copy,
@@ -38,6 +39,16 @@ import {
   withdrawVaultBucket
 } from './lib/soroban';
 import { connectFreighter, getStellarExpertUrl, submitBucketPayment, tryAutoConnect } from './lib/stellar';
+import {
+  clearLogEntries,
+  getLogEntries,
+  logDebug,
+  logError,
+  logInfo,
+  logsToText,
+  subscribeLogEntries,
+  type LogEntry
+} from './lib/logger';
 import { clearLocalRemittances, clearRemittances, isSupabaseConfigured, listRemittances, listRemittancesForWallet, saveRemittance } from './lib/storage';
 import type { BucketDraft, RemittanceFormState, RemittanceRecord, SplitMode } from './lib/types';
 
@@ -59,6 +70,8 @@ type AppView = 'sender' | 'recipient';
 type AppScreen = 'landing' | 'app';
 const WALLET_STORAGE_KEY = 'padalasplit.walletPublicKey';
 
+const messageFromError = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
+
 function App() {
   const [screen, setScreen] = useState<AppScreen>('landing');
   const [sessionId, setSessionId] = useState('');
@@ -72,17 +85,49 @@ function App() {
   const [withdrawingBucketId, setWithdrawingBucketId] = useState('');
   const [activeView, setActiveView] = useState<AppView>('sender');
   const [vaultProgress, setVaultProgress] = useState<VaultProgressUpdate | null>(null);
+  const [debugLogs, setDebugLogs] = useState<LogEntry[]>(() => getLogEntries());
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
 
   const loadHistoryForWallet = async (publicKey: string) => {
+    logInfo('app.history', 'Loading remittance history for wallet.', { publicKey });
     const records = await listRemittancesForWallet(publicKey);
     const normalized = records.map(normalizeInterruptedSubmission);
+    logInfo('app.history', 'Loaded wallet remittance history.', { publicKey, count: normalized.length });
     setHistory(normalized);
     if (normalized[0]) setActiveRemittance(normalized[0]);
   };
 
+  useEffect(() => subscribeLogEntries(setDebugLogs), []);
+
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      logError('browser.error', event.message || 'Unhandled browser error.', event.error, {
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno
+      });
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logError('browser.unhandledRejection', 'Unhandled promise rejection.', event.reason);
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
   useEffect(() => {
     const nextSessionId = createSessionId();
     setSessionId(nextSessionId);
+    logInfo('app.init', 'Starting app session.', {
+      sessionId: nextSessionId,
+      vaultConfigured: isSorobanVaultConfigured(),
+      supabaseConfigured: isSupabaseConfigured()
+    });
 
     const init = async () => {
       // Try to silently reconnect Freighter (no popup)
@@ -99,16 +144,19 @@ function App() {
         await loadHistoryForWallet(publicKey);
       } else {
         // First-time visitor with no wallet — load by session (empty)
+        logInfo('app.history', 'Loading remittance history for session.', { sessionId: nextSessionId });
         const records = await listRemittances(nextSessionId);
         const normalized = records.map(normalizeInterruptedSubmission);
+        logInfo('app.history', 'Loaded session remittance history.', { sessionId: nextSessionId, count: normalized.length });
         setHistory(normalized);
         if (normalized[0]) setActiveRemittance(normalized[0]);
       }
     };
 
-    init().catch((error) =>
-      setMessage(error instanceof Error ? error.message : 'Unable to load remittance history.')
-    );
+    init().catch((error) => {
+      logError('app.init', 'Unable to initialize app history.', error);
+      setMessage(messageFromError(error, 'Unable to load remittance history.'));
+    });
   }, []);
 
   const calculatedBuckets = useMemo(
@@ -141,9 +189,18 @@ function App() {
   };
 
   const persistAndSelect = async (remittance: RemittanceRecord) => {
+    logDebug('app.persist', 'Saving remittance record.', {
+      remittanceId: remittance.id,
+      status: remittance.status,
+      bucketCount: remittance.buckets.length
+    });
     const saved = await saveRemittance(remittance);
     setActiveRemittance(saved);
     setHistory((records) => [saved, ...records.filter((record) => record.id !== saved.id)]);
+    logDebug('app.persist', 'Saved remittance record.', {
+      remittanceId: saved.id,
+      status: saved.status
+    });
     return saved;
   };
 
@@ -158,6 +215,13 @@ function App() {
     setIsSaving(true);
     setMessage('');
     try {
+      logInfo('app.createPreview', 'Creating remittance preview.', {
+        sessionId,
+        senderPublicKey,
+        recipientAddress: nextForm.recipientAddress,
+        totalAmount: nextForm.totalAmount,
+        bucketCount: nextForm.buckets.length
+      });
       const remittance = createRemittanceRecord(nextForm, sessionId, senderPublicKey || undefined);
       await persistAndSelect(remittance);
       setMessage(
@@ -166,7 +230,8 @@ function App() {
           : 'Remittance preview saved. Configure the vault for locked buckets, or use direct Testnet payments for unlocked buckets.'
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to save remittance.');
+      logError('app.createPreview', 'Unable to save remittance preview.', error);
+      setMessage(messageFromError(error, 'Unable to save remittance.'));
     } finally {
       setIsSaving(false);
     }
@@ -179,6 +244,7 @@ function App() {
 
   const handleClearHistory = async () => {
     try {
+      logInfo('app.reset', 'Clearing demo history.', { count: history.length });
       await clearRemittances(history.map((record) => record.id));
       clearLocalRemittances();
       setHistory([]);
@@ -186,7 +252,8 @@ function App() {
       setVaultProgress(null);
       setMessage('Demo reset complete. Local/app history was cleared; any on-chain vault funds remain on Soroban Testnet.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to clear transaction history.');
+      logError('app.reset', 'Unable to clear transaction history.', error);
+      setMessage(messageFromError(error, 'Unable to clear transaction history.'));
     }
   };
 
@@ -200,7 +267,8 @@ function App() {
       // Reload history for the connected wallet
       await loadHistoryForWallet(publicKey);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to connect Freighter.');
+      logError('app.connectFreighter', 'Unable to connect Freighter.', error);
+      setMessage(messageFromError(error, 'Unable to connect Freighter.'));
     }
   };
 
@@ -222,6 +290,7 @@ function App() {
     };
 
     await persistAndSelect(updated);
+    logInfo('app.demoProof', 'Generated demo proof.', { remittanceId: updated.id, bucketCount: updated.buckets.length });
     setMessage('Demo proof generated. Use real Testnet payments for judge-verifiable hashes.');
   };
 
@@ -239,6 +308,12 @@ function App() {
     setIsSubmitting(true);
     setMessage('');
     let working: RemittanceRecord = { ...activeRemittance, senderPublicKey, status: 'submitting' };
+    logInfo('app.directPayments', 'Starting direct bucket payments.', {
+      remittanceId: working.id,
+      bucketCount: working.buckets.length,
+      senderPublicKey,
+      recipientAddress: working.recipientAddress
+    });
     await persistAndSelect(working);
 
     for (const bucket of working.buckets) {
@@ -251,6 +326,12 @@ function App() {
       await persistAndSelect(working);
 
       try {
+        logInfo('app.directPayments', 'Submitting bucket payment.', {
+          remittanceId: working.id,
+          bucketId: bucket.id,
+          label: bucket.label,
+          amount: bucket.amount
+        });
         const result = await submitBucketPayment({
           sourcePublicKey: senderPublicKey,
           destination: working.recipientAddress,
@@ -270,7 +351,18 @@ function App() {
               : candidate
           )
         };
+        logInfo('app.directPayments', 'Bucket payment succeeded.', {
+          remittanceId: working.id,
+          bucketId: bucket.id,
+          hash: result.hash
+        });
       } catch (error) {
+        logError('app.directPayments', 'Bucket payment failed.', error, {
+          remittanceId: working.id,
+          bucketId: bucket.id,
+          label: bucket.label,
+          amount: bucket.amount
+        });
         working = {
           ...working,
           status: 'partial',
@@ -293,6 +385,7 @@ function App() {
 
     working = { ...working, status: 'completed' };
     await persistAndSelect(working);
+    logInfo('app.directPayments', 'All direct bucket payments completed.', { remittanceId: working.id });
     setMessage('All bucket payments submitted on Stellar Testnet.');
     setIsSubmitting(false);
   };
@@ -315,6 +408,12 @@ function App() {
     };
     setVaultProgress(initialProgress);
     setMessage(initialProgress.message);
+    logInfo('app.vault', 'Starting Soroban vault remittance.', {
+      remittanceId: activeRemittance.id,
+      senderPublicKey,
+      recipientAddress: activeRemittance.recipientAddress,
+      bucketCount: activeRemittance.buckets.length
+    });
     let working: RemittanceRecord = {
       ...activeRemittance,
       senderPublicKey,
@@ -334,6 +433,11 @@ function App() {
         remittanceId: working.id,
         buckets: working.buckets.map((bucket) => bucketToVaultSpec(working.id, bucket)),
         onProgress: (progress) => {
+          logInfo('app.vault', 'Vault progress update.', {
+            remittanceId: working.id,
+            phase: progress.phase,
+            hash: progress.hash
+          });
           setVaultProgress(progress);
           setMessage(progress.message);
           // Eagerly persist vault metadata when the transaction is
@@ -351,9 +455,15 @@ function App() {
       working = applyVaultMetadata(working, result);
       await persistAndSelect(working);
       setVaultProgress(null);
+      logInfo('app.vault', 'Vault remittance completed.', { remittanceId: working.id, hash: result.hash });
       setMessage('Vault remittance created on Soroban Testnet. Recipient can withdraw each bucket after unlock.');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Vault remittance failed.';
+      const errorMessage = messageFromError(error, 'Vault remittance failed.');
+      logError('app.vault', 'Vault remittance failed.', error, {
+        remittanceId: working.id,
+        senderPublicKey,
+        recipientAddress: working.recipientAddress
+      });
       working =
         errorMessage === REMITTANCE_EXISTS_MESSAGE
           ? applyVaultMetadata(working)
@@ -388,6 +498,11 @@ function App() {
     setWithdrawingBucketId(bucket.id);
     setMessage('');
     try {
+      logInfo('app.withdraw', 'Starting bucket withdrawal.', {
+        remittanceId: activeRemittance.id,
+        bucketId: bucket.id,
+        senderPublicKey
+      });
       const result = await withdrawVaultBucket({
         sourcePublicKey: senderPublicKey,
         remittanceId: activeRemittance.id,
@@ -408,8 +523,18 @@ function App() {
         )
       };
       await persistAndSelect(updated);
+      logInfo('app.withdraw', 'Bucket withdrawal completed.', {
+        remittanceId: activeRemittance.id,
+        bucketId: bucket.id,
+        hash: result.hash
+      });
       setMessage(`${bucket.label} withdrawn from the Soroban vault.`);
     } catch (error) {
+      logError('app.withdraw', 'Bucket withdrawal failed.', error, {
+        remittanceId: activeRemittance.id,
+        bucketId: bucket.id,
+        senderPublicKey
+      });
       const updated: RemittanceRecord = {
         ...activeRemittance,
         buckets: activeRemittance.buckets.map((candidate) =>
@@ -422,7 +547,7 @@ function App() {
         )
       };
       await persistAndSelect(updated);
-      setMessage(error instanceof Error ? error.message : 'Unable to withdraw bucket.');
+      setMessage(messageFromError(error, 'Unable to withdraw bucket.'));
     } finally {
       setWithdrawingBucketId('');
     }
@@ -442,14 +567,37 @@ function App() {
     setMessage('Checking Soroban vault for on-chain bucket data…');
     setIsSubmitting(true);
     try {
+      logInfo('app.recover', 'Recovering vault data from chain.', {
+        remittanceId: target.id,
+        bucketCount: target.buckets.length
+      });
       const recovered = await recoverVaultRemittance(target);
       await persistAndSelect(recovered);
+      logInfo('app.recover', 'Vault data recovered from chain.', { remittanceId: target.id });
       setMessage('Vault recovered from on-chain data. You can now withdraw unlocked buckets.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to recover vault data.');
+      logError('app.recover', 'Unable to recover vault data.', error, { remittanceId: target.id });
+      setMessage(messageFromError(error, 'Unable to recover vault data.'));
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCopyDebugLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(logsToText(debugLogs));
+      logInfo('app.debugLogs', 'Copied debug logs.', { count: debugLogs.length });
+      setMessage('Debug logs copied.');
+    } catch (error) {
+      logError('app.debugLogs', 'Unable to copy debug logs.', error, { count: debugLogs.length });
+      setMessage('Unable to copy debug logs. Open the browser console for the same entries.');
+    }
+  };
+
+  const handleClearDebugLogs = () => {
+    clearLogEntries();
+    setDebugLogs([]);
+    setMessage('Debug logs cleared.');
   };
 
   const currentTotals = activeRemittance ? getRemittanceTotals(activeRemittance) : null;
@@ -607,6 +755,49 @@ function App() {
       </section>
 
       {message && <div className="toast">{message}</div>}
+
+      <section className="debug-panel">
+        <div className="debug-heading">
+          <div>
+            <p className="eyebrow">Debug</p>
+            <h2>Runtime Logs</h2>
+          </div>
+          <div className="debug-actions">
+            <span className="network-pill">{debugLogs.length} events</span>
+            <button type="button" className="secondary-button compact" onClick={() => setShowDebugLogs((current) => !current)}>
+              <Bug size={16} />
+              {showDebugLogs ? 'Hide Logs' : 'Show Logs'}
+            </button>
+            <button type="button" className="secondary-button compact" disabled={debugLogs.length === 0} onClick={handleCopyDebugLogs}>
+              <Copy size={16} />
+              Copy Logs
+            </button>
+            <button type="button" className="secondary-button compact danger-action" disabled={debugLogs.length === 0} onClick={handleClearDebugLogs}>
+              <Trash2 size={16} />
+              Clear Logs
+            </button>
+          </div>
+        </div>
+        {showDebugLogs && (
+          <div className="debug-log-list">
+            {debugLogs.length > 0 ? (
+              debugLogs.slice(0, 20).map((entry) => (
+                <article className={`debug-log-item ${entry.level}`} key={entry.id}>
+                  <div>
+                    <strong>{entry.level.toUpperCase()} · {entry.scope}</strong>
+                    <time>{new Date(entry.timestamp).toLocaleTimeString()}</time>
+                  </div>
+                  <p>{entry.message}</p>
+                  {entry.context && <pre>{JSON.stringify(entry.context, null, 2)}</pre>}
+                  {entry.error && <pre>{entry.error.name ? `${entry.error.name}: ${entry.error.message}` : entry.error.message}</pre>}
+                </article>
+              ))
+            ) : (
+              <p className="muted">No logs yet.</p>
+            )}
+          </div>
+        )}
+      </section>
 
       {activeView === 'sender' && (
       <div className="workspace">
