@@ -53,10 +53,10 @@ export const createDefaultUnlockAt = (minutesFromNow = 3) => {
   return date.toISOString().slice(0, 16);
 };
 
-export const createDemoForm = (): RemittanceFormState => ({
+export const createDemoForm = (recipientAddress?: string): RemittanceFormState => ({
   senderName: 'Maria Santos',
   recipientName: 'Ana Santos',
-  recipientAddress: getDemoRecipientAddress(),
+  recipientAddress: recipientAddress || getDemoRecipientAddress(),
   totalAmount: 100,
   splitMode: 'percentage',
   buckets: DEFAULT_BUCKETS.map((bucket) => ({

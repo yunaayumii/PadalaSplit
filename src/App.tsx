@@ -75,7 +75,7 @@ const messageFromError = (error: unknown, fallback: string) => (error instanceof
 function App() {
   const [screen, setScreen] = useState<AppScreen>('landing');
   const [sessionId, setSessionId] = useState('');
-  const [form, setForm] = useState<RemittanceFormState>(() => createDemoForm());
+  const [form, setForm] = useState<RemittanceFormState>(() => createDemoForm(window.localStorage.getItem(WALLET_STORAGE_KEY) || undefined));
   const [senderPublicKey, setSenderPublicKey] = useState('');
   const [activeRemittance, setActiveRemittance] = useState<RemittanceRecord | null>(null);
   const [history, setHistory] = useState<RemittanceRecord[]>([]);
@@ -700,7 +700,7 @@ function App() {
         </div>
         <div className="hero-actions">
           <span className="network-pill">Stellar Testnet</span>
-          <button type="button" className="secondary-button" onClick={() => setForm(createDemoForm())}>
+          <button type="button" className="secondary-button" onClick={() => setForm(createDemoForm(senderPublicKey || window.localStorage.getItem(WALLET_STORAGE_KEY) || undefined))}>
             Load Demo
           </button>
           <button type="button" className="secondary-button" onClick={() => setScreen('landing')}>
@@ -1122,15 +1122,24 @@ function App() {
             )}
             <div className="proof-list">
               {dashboardRemittance.buckets.map((bucket) => {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const isStillLocked =
+                  isVaultBacked(dashboardRemittance) &&
+                  bucket.paymentStatus !== 'withdrawn' &&
+                  bucket.unlockTimestamp != null &&
+                  bucket.unlockTimestamp > nowSec;
                 const canWithdraw =
                   isVaultBacked(dashboardRemittance) &&
                   bucket.paymentStatus !== 'withdrawn' &&
-                  (!bucket.unlockTimestamp || bucket.unlockTimestamp <= Math.floor(Date.now() / 1000));
-                const displayStatus =
-                  canWithdraw && bucket.paymentStatus !== 'withdrawn' ? 'withdrawable' : bucket.paymentStatus;
+                  (!bucket.unlockTimestamp || bucket.unlockTimestamp <= nowSec);
+                const displayStatus = isStillLocked
+                  ? 'vaulted'
+                  : canWithdraw && bucket.paymentStatus !== 'withdrawn'
+                    ? 'withdrawable'
+                    : bucket.paymentStatus;
 
                 return (
-                  <article className="proof-item" key={bucket.id}>
+                  <article className={`proof-item${isStillLocked ? ' is-locked-bucket' : ''}`} key={bucket.id}>
                     <div>
                       <strong>{bucket.label}</strong>
                       <span>{bucket.locked ? bucket.releaseNote : 'Available immediately'}</span>
@@ -1148,16 +1157,23 @@ function App() {
                     ) : (
                       <span className="muted">No proof yet</span>
                     )}
-                    {isVaultBacked(dashboardRemittance) && (
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        disabled={!canWithdraw || withdrawingBucketId === bucket.id}
-                        onClick={() => handleWithdrawBucket(bucket)}
-                      >
-                        {withdrawingBucketId === bucket.id ? <Loader2 className="spin" size={16} /> : <Unlock size={16} />}
-                        Withdraw
-                      </button>
+                    {isVaultBacked(dashboardRemittance) && bucket.paymentStatus !== 'withdrawn' && (
+                      isStillLocked ? (
+                        <span className="locked-badge">
+                          <LockKeyhole size={14} />
+                          Locked until {new Date((bucket.unlockTimestamp ?? 0) * 1000).toLocaleString()}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary-button compact"
+                          disabled={!canWithdraw || withdrawingBucketId === bucket.id}
+                          onClick={() => handleWithdrawBucket(bucket)}
+                        >
+                          {withdrawingBucketId === bucket.id ? <Loader2 className="spin" size={16} /> : <Unlock size={16} />}
+                          Withdraw
+                        </button>
+                      )
                     )}
                     {bucket.withdrawalExpertUrl && (
                       <a className="icon-link" href={bucket.withdrawalExpertUrl} target="_blank" rel="noreferrer">
